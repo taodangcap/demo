@@ -1,0 +1,31 @@
+## .NET build
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.cache
+*.pdb
+*.nupkg
+.vs/
+
+## Installer / packaged output
+installer-output/
+
+## Runtime / local logs
+crash.log
+audio_debug.log
+*.db
+*.db-shm
+*.db-wal
+**/ShowCuePlayer.exe.WebView2/
+
+## OS / IDE
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+*.swp
+*~

@@ -1,0 +1,12 @@
+<Window x:Class="ShowCuePlayer.Views.KaraokeSecondaryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="ShowCue · Karaoke OUTPUT" Height="450" Width="800"
+        WindowStyle="None" Background="Black"
+        Topmost="True" ShowInTaskbar="True" ShowActivated="False">
+    <Grid>
+        <wv2:WebView2 x:Name="SecondaryWebView" />
+        <Border Background="Transparent" IsHitTestVisible="True" Panel.ZIndex="100"/>
+    </Grid>
+</Window>

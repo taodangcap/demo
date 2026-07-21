@@ -1,0 +1,1767 @@
+<Window x:Class="ShowCuePlayer.MainWindow"
+        x:Name="MainRoot"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:ShowCuePlayer.Controls"
+        xmlns:helpers="clr-namespace:ShowCuePlayer.Helpers"
+        xmlns:vm="clr-namespace:ShowCuePlayer.ViewModels"
+        xmlns:fa="http://schemas.awesome.incremented/wpf/xaml/fontawesome.sharp"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Show Cue Player"
+        Icon="pack://application:,,,/Assets/logo.png"
+        Background="{StaticResource BgBaseBrush}"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ResizeMode="CanResize"
+        FontFamily="Segoe UI Variable, Segoe UI, Arial">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVis"/>
+        <helpers:InverseBoolConverter x:Key="InverseBoolConverter"/>
+        <controls:ZeroToVisibilityConverter x:Key="ZeroToVisibilityConverter"/>
+        <controls:NonZeroToVisibilityConverter x:Key="NonZeroVis"/>
+        <controls:EmptyStringToVisibilityConverter x:Key="EmptyStringVis"/>
+        <helpers:ScreenActiveBrushConverter x:Key="ScreenActiveBrushConverter"/>
+    </Window.Resources>
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0" ResizeBorderThickness="6"
+                      GlassFrameThickness="0" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="44"/>   <!-- unified header -->
+            <RowDefinition Height="*"/>    <!-- workspace -->
+            <RowDefinition Height="28"/>   <!-- status bar -->
+        </Grid.RowDefinitions>
+
+        <!-- ══════════════ UNIFIED HEADER (title + tools, 1 row) ══════════════ -->
+        <Border Grid.Row="0" Background="{StaticResource BgDeepBrush}"
+                BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="0,0,0,1"
+                MouseDown="TitleBar_MouseDown">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>   <!-- brand -->
+                    <ColumnDefinition Width="*"/>      <!-- tools (scroll if narrow) -->
+                    <ColumnDefinition Width="Auto"/>   <!-- chrome -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Brand / drag zone -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,8,0">
+                    <Image Source="pack://application:,,,/Assets/logo.png" Width="16" Height="16"
+                           Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <TextBlock Text="{Binding ProjectName}"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontSize="13" FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               MaxWidth="160" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding ProjectName}"/>
+                </StackPanel>
+
+                <!-- Tools -->
+                <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled" Margin="0,0,4,0">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Height="44">
+                        <Border Background="#151A20" BorderBrush="{StaticResource BorderStrongBrush}"
+                                BorderThickness="1" CornerRadius="5" Margin="0,6,8,6">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="SHOW" Command="{Binding ShowWorkspaceCommand}"
+                                        Padding="12,2" BorderThickness="0">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsShowWorkspace}" Value="True">
+                                                    <Setter Property="Background" Value="#23405A"/>
+                                                    <Setter Property="Foreground" Value="White"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Content="MIXER" Command="{Binding MixerWorkspaceCommand}"
+                                        Padding="12,2" BorderThickness="0">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsMixerWorkspace}" Value="True">
+                                                    <Setter Property="Background" Value="#5A2020"/>
+                                                    <Setter Property="Foreground" Value="White"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Edit tools — ẩn khi Live mode -->
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsLiveMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <Button Style="{StaticResource ToolbarActionButtonStyle}"
+                                    Command="{Binding AddMediaCommand}"
+                                    ToolTip="Chọn media; app tự đưa Audio và Video/Ảnh vào đúng tab">
+                                <StackPanel Orientation="Horizontal">
+                                    <fa:IconBlock Icon="Plus" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Thêm media" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                    Command="{Binding OpenProjectCommand}" ToolTip="Mở project">
+                                <fa:IconBlock Icon="FolderOpen" FontSize="14"/>
+                            </Button>
+                            <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                    Command="{Binding SaveProjectCommand}" ToolTip="Lưu project">
+                                <fa:IconBlock Icon="Save" FontSize="14"/>
+                            </Button>
+                        </StackPanel>
+
+                        <!-- GO / NEXT live -->
+                        <Button Style="{StaticResource ToolbarActionButtonStyle}"
+                                Command="{Binding GoCommand}"
+                                Visibility="Collapsed"
+                                Background="#1A2ECC71"
+                                ToolTip="GO — phát cue đang chờ (Space)">
+                            <StackPanel Orientation="Horizontal">
+                                <fa:IconBlock Icon="Play" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center"
+                                              Foreground="{StaticResource SuccessBrush}"/>
+                                <TextBlock Text="GO" FontWeight="Bold" VerticalAlignment="Center"
+                                           Foreground="{StaticResource SuccessBrush}"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                Command="{Binding GoPreviousCommand}"
+                                ToolTip="Phát cue liền trước (←)">
+                            <fa:IconBlock Icon="BackwardStep" FontSize="14"/>
+                        </Button>
+                        <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                Command="{Binding GoNextCommand}"
+                                ToolTip="Phát cue liền sau (→)">
+                            <fa:IconBlock Icon="ForwardStep" FontSize="14"/>
+                        </Button>
+
+                        <Rectangle Style="{StaticResource ToolbarDividerStyle}"/>
+
+                        <!-- Stop tab / all -->
+                        <Button Style="{StaticResource ToolbarStopButtonStyle}"
+                                Command="{Binding StopSelectedTabCommand}"
+                                ToolTip="Tắt tab đang chọn (phím Esc)">
+                            <StackPanel Orientation="Horizontal">
+                                <fa:IconBlock Icon="Stop" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center"
+                                              Foreground="{StaticResource DangerBrush}"/>
+                                <TextBlock Text="Dừng tab" VerticalAlignment="Center" Foreground="{StaticResource DangerBrush}"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                Command="{Binding StopAllCommand}"
+                                Visibility="Collapsed"
+                                ToolTip="Tắt tất cả tab (Shift+Esc)"
+                                Foreground="{StaticResource DangerBrush}">
+                            <fa:IconBlock Icon="Ban" FontSize="14" Foreground="{StaticResource DangerBrush}"/>
+                        </Button>
+
+                        <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                Visibility="Collapsed"
+                                ToolTip="Màn output đen + logo (phím B)">
+                            <fa:IconBlock Icon="Moon" FontSize="14"/>
+                        </Button>
+
+                        <Rectangle Style="{StaticResource ToolbarDividerStyle}"/>
+
+                        <!-- Dual-monitor: ARM output -->
+                        <ToggleButton Style="{StaticResource ToolbarToggleButtonStyle}"
+                                      IsChecked="{Binding IsVideoOutputEnabled, Mode=TwoWay}"
+                                      Visibility="Collapsed"
+                                      ToolTip="Bật / tắt màn OUTPUT (projector)">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="#888"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsOutputPlaying}" Value="True">
+                                                    <Setter Property="Fill" Value="{StaticResource PlayingGreenBrush}"/>
+                                                </DataTrigger>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding IsVideoOutputEnabled}" Value="True"/>
+                                                        <Condition Binding="{Binding IsOutputPlaying}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Fill" Value="#FFC107"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Text="{Binding OutputStatusText}" FontSize="12" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" MaxWidth="140" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </ToggleButton>
+
+                        <Rectangle Style="{StaticResource ToolbarDividerStyle}"/>
+
+                        <!-- Search -->
+                        <Grid x:Name="SearchBoxHost" Width="260" MinWidth="160" MaxWidth="380" Height="34" VerticalAlignment="Center">
+                            <TextBox x:Name="SearchBox"
+                                     Style="{StaticResource AppTextBoxStyle}"
+                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                     Padding="30,0,10,0" FontSize="13" Height="34"
+                                     ToolTip="Lọc cue trong tab hiện tại"/>
+                            <fa:IconBlock Icon="Search" FontSize="12"
+                                          Foreground="{StaticResource TextSecondaryBrush}"
+                                          HorizontalAlignment="Left" VerticalAlignment="Center"
+                                          Margin="10,0,0,0" IsHitTestVisible="False"/>
+                            <Popup PlacementTarget="{Binding ElementName=SearchBox}"
+                                   Placement="Bottom" StaysOpen="False" AllowsTransparency="True"
+                                   DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                                   IsOpen="{Binding ShowSearchSuggestions, Mode=TwoWay}">
+                                <Border Background="#050505"
+                                        BorderBrush="#252525" BorderThickness="1"
+                                        CornerRadius="14" MinWidth="360" MaxWidth="480"
+                                        Margin="0,7,0,0" ClipToBounds="True">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  MaxHeight="350">
+                                        <ItemsControl ItemsSource="{Binding SearchSuggestions}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Content="{Binding}" Tag="{Binding}" Click="SearchSuggestion_Click"
+                                                            Background="Transparent" BorderThickness="0"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            Padding="0" Cursor="Hand">
+                                                        <Button.Template>
+                                                            <ControlTemplate TargetType="Button">
+                                                                <Border x:Name="Row" Background="Transparent"
+                                                                        BorderBrush="#202020" BorderThickness="0,0,0,1"
+                                                                        Padding="14,11">
+                                                                    <Grid>
+                                                                        <Grid.ColumnDefinitions>
+                                                                            <ColumnDefinition Width="28"/>
+                                                                            <ColumnDefinition Width="*"/>
+                                                                            <ColumnDefinition Width="28"/>
+                                                                        </Grid.ColumnDefinitions>
+                                                                        <fa:IconBlock Icon="Search" FontSize="13"
+                                                                                      Foreground="#3B82F6"
+                                                                                      VerticalAlignment="Center"/>
+                                                                        <TextBlock Grid.Column="1" Text="{TemplateBinding Content}"
+                                                                                   Foreground="White" FontSize="13"
+                                                                                   FontWeight="SemiBold"
+                                                                                   TextTrimming="CharacterEllipsis"
+                                                                                   VerticalAlignment="Center"/>
+                                                                        <fa:IconBlock Grid.Column="2" Icon="ArrowUpRightFromSquare"
+                                                                                      FontSize="11" Foreground="#64748B"
+                                                                                      HorizontalAlignment="Right"
+                                                                                      VerticalAlignment="Center"/>
+                                                                    </Grid>
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="Row" Property="Background" Value="#172033"/>
+                                                                    </Trigger>
+                                                                    <Trigger Property="IsPressed" Value="True">
+                                                                        <Setter TargetName="Row" Property="Background" Value="#22304A"/>
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Button.Template>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+
+                        <Rectangle Style="{StaticResource ToolbarDividerStyle}"/>
+
+                        <!-- Volume -->
+                        <fa:IconBlock Icon="VolumeHigh" FontSize="13" VerticalAlignment="Center"
+                                      Visibility="Collapsed"
+                                      Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,6,0"/>
+                        <Slider Minimum="0" Maximum="1"
+                                Visibility="Collapsed"
+                                Style="{StaticResource HorizontalSliderStyle}"
+                                Value="{Binding MasterVolume, Mode=TwoWay}"
+                                Width="80" Height="22" VerticalAlignment="Center"
+                                ToolTip="Âm lượng tổng"/>
+                        <TextBlock Text="{Binding MasterVolume, StringFormat={}{0:P0}}"
+                                   Visibility="Collapsed"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   FontSize="12" FontWeight="SemiBold" Width="36" Margin="4,0,0,0"
+                                   VerticalAlignment="Center"/>
+
+                        <Rectangle Style="{StaticResource ToolbarDividerStyle}"/>
+
+                        <!-- Output / audio setup popup -->
+                        <ToggleButton x:Name="BtnOutputs"
+                                      Style="{StaticResource ToolbarToggleButtonStyle}"
+                                      ToolTip="Cài màn hình + loa">
+                            <StackPanel Orientation="Horizontal">
+                                <fa:IconBlock Icon="Sliders" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Màn/Loa" FontSize="12" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
+                        <Popup PlacementTarget="{Binding ElementName=BtnOutputs}"
+                               Placement="Bottom"
+                               IsOpen="{Binding IsChecked, ElementName=BtnOutputs, Mode=TwoWay}"
+                               StaysOpen="False" AllowsTransparency="True"
+                               PopupAnimation="Fade"
+                               DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <Border Background="{StaticResource BgElevatedBrush}"
+                                    BorderBrush="{StaticResource BorderStrongBrush}"
+                                    BorderThickness="1" CornerRadius="8" Padding="16"
+                                    MinWidth="320">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.45" Color="#000"/>
+                                </Border.Effect>
+                                <StackPanel>
+                                    <TextBlock Text="CÀI ĐẶT 2 MÀN HÌNH" FontSize="13" FontWeight="Bold"
+                                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,12"/>
+
+                                    <TextBlock Text="1. Máy điều khiển" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,2"/>
+                                    <TextBlock Text="Giữ cửa sổ app trên màn này" FontSize="12"
+                                               Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,12"/>
+
+                                    <TextBlock Text="2. Màn OUTPUT (sân khấu / LED / projector)" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,6"/>
+                                    <ComboBox Style="{StaticResource DarkComboBoxStyle}"
+                                              ItemsSource="{Binding VideoScreens}"
+                                              SelectedItem="{Binding SelectedVideoScreen, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                              DisplayMemberPath="DisplayName" Height="34" FontSize="12"
+                                              Margin="0,0,0,8"/>
+
+                                    <CheckBox Content="Bật màn output (fullscreen sẵn sàng)"
+                                              IsChecked="{Binding IsVideoOutputEnabled, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                              Foreground="{StaticResource TextPrimaryBrush}"
+                                              FontSize="13" Margin="0,0,0,14"/>
+
+                                    <TextBlock Text="3. Loa / audio device" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,6"/>
+                                    <ComboBox Style="{StaticResource DarkComboBoxStyle}"
+                                              ItemsSource="{Binding OutputDevices}"
+                                              SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                              DisplayMemberPath="Name" Height="34" FontSize="12"
+                                              Margin="0,0,0,10"/>
+
+                                    <TextBlock Text="4. MIXER ÂM THANH" FontSize="13" FontWeight="Bold"
+                                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,4,0,8"/>
+                                    <Grid Margin="0,0,0,5">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="72"/><ColumnDefinition Width="*"/><ColumnDefinition Width="42"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="AUDIO" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                        <Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding AudioBusVolume, Mode=TwoWay}" Style="{StaticResource HorizontalSliderStyle}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding AudioBusVolume, StringFormat={}{0:P0}}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,5">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="72"/><ColumnDefinition Width="*"/><ColumnDefinition Width="42"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="VIDEO" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                        <Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding VideoBusVolume, Mode=TwoWay}" Style="{StaticResource HorizontalSliderStyle}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding VideoBusVolume, StringFormat={}{0:P0}}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,5">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="72"/><ColumnDefinition Width="*"/><ColumnDefinition Width="42"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="KARAOKE" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                        <Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding KaraokeBusVolume, Mode=TwoWay}" Style="{StaticResource HorizontalSliderStyle}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding KaraokeBusVolume, StringFormat={}{0:P0}}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="72"/><ColumnDefinition Width="*"/><ColumnDefinition Width="42"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="MASTER" FontWeight="Bold" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                        <Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding MasterVolume, Mode=TwoWay}" Style="{StaticResource HorizontalSliderStyle}"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding MasterVolume, StringFormat={}{0:P0}}" HorizontalAlignment="Right" VerticalAlignment="Center" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    </Grid>
+
+                                    <TextBlock Text="Esc = tắt tab · B = màn đen · Shift+Esc = tắt hết"
+                                               FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+
+                        <!-- Show safety -->
+                        <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                Command="{Binding ValidateAllMediaCommand}"
+                                Visibility="Collapsed"
+                                ToolTip="Kiểm tra file thiếu (USB / path)">
+                            <Grid>
+                                <fa:IconBlock Icon="TriangleExclamation" FontSize="14"/>
+                                <Border HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Background="{StaticResource DangerBrush}" CornerRadius="6"
+                                        Padding="3,0" Margin="10,-4,-6,0"
+                                        Visibility="{Binding MissingMediaCount, Converter={StaticResource NonZeroVis}}">
+                                    <TextBlock Text="{Binding MissingMediaCount}" FontSize="9" Foreground="White" FontWeight="Bold"/>
+                                </Border>
+                            </Grid>
+                        </Button>
+                        <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                Command="{Binding ExportSetlistCommand}"
+                                Visibility="Collapsed"
+                                ToolTip="Export setlist TXT/CSV cho MC">
+                            <fa:IconBlock Icon="FileExport" FontSize="14"/>
+                        </Button>
+
+                        <!-- Live preview on control screen -->
+                        <ToggleButton Style="{StaticResource ToolbarToggleButtonStyle}"
+                                      IsChecked="{Binding IsLivePreviewVisible, Mode=TwoWay}"
+                                      ToolTip="Hiện / ẩn panel xem trước bên phải">
+                            <StackPanel Orientation="Horizontal">
+                                <fa:IconBlock Icon="Tv" FontSize="13" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Xem trước" FontSize="12" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
+
+                        <!-- More menu -->
+                        <Button Style="{StaticResource ToolbarIconButtonStyle}"
+                                Click="OpenButtonMenu_Click"
+                                ToolTip="Thêm tùy chọn">
+                            <fa:IconBlock Icon="EllipsisVertical" FontSize="13"/>
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Thêm media…" Command="{Binding AddMediaCommand}"/>
+                                    <MenuItem Header="Thêm cả thư mục…" Command="{Binding AddFolderCommand}"/>
+                                    <Separator/>
+                                    <MenuItem Header="Karaoke Web" Command="{Binding OpenKaraokeCommand}"/>
+                                    <Separator/>
+                                    <MenuItem Header="Playlist Audio mới" Command="{Binding AddPlaylistCommand}"/>
+                                    <MenuItem Header="Playlist Video mới" Command="{Binding AddVideoPlaylistCommand}"/>
+                                    <MenuItem Header="Thêm cue trống" Command="{Binding AddEmptyCueCommand}"/>
+                                    <MenuItem Header="Xóa các cue trống" Command="{Binding DeleteEmptyCommand}"/>
+                                    <Separator/>
+                                    <MenuItem Header="⚠ Kiểm tra file thiếu" Command="{Binding ValidateAllMediaCommand}"/>
+                                    <MenuItem Header="📄 Export setlist…" Command="{Binding ExportSetlistCommand}"/>
+                                    <Separator/>
+                                    <MenuItem Header="Chế độ chỉnh sửa" IsCheckable="True"
+                                              IsChecked="{Binding IsEditMode, Mode=TwoWay}"/>
+                                    <Separator/>
+                                    <MenuItem Header="Cài đặt…" Command="{Binding OpenSettingsCommand}"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                        </Button>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Window chrome -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button x:Name="BtnMinimize" Content="─" Style="{StaticResource WindowChromeButtonStyle}"
+                            Click="BtnMinimize_Click"/>
+                    <Button x:Name="BtnMaximize" Content="□" Style="{StaticResource WindowChromeButtonStyle}"
+                            Click="BtnMaximize_Click"/>
+                    <Button x:Name="BtnClose" Content="✕" Style="{StaticResource WindowCloseButtonStyle}"
+                            Click="BtnClose_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ══════════════ CUE GRID (responsive columns) ══════════════ -->
+        <Grid x:Name="ContentGrid" Grid.Row="1" SizeChanged="ContentGrid_SizeChanged"
+              Visibility="{Binding IsShowWorkspace, Converter={StaticResource BoolVis}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="ColMain" Width="*" MinWidth="280"/>
+                <ColumnDefinition x:Name="ColSplitter" Width="0"/>
+                <ColumnDefinition x:Name="ColPreview" Width="0" MinWidth="0" MaxWidth="520"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Tab Control -->
+            <TabControl Grid.Column="0" Margin="4,4,2,0" 
+                        ItemsSource="{Binding Playlists}" 
+                        SelectedItem="{Binding SelectedPlaylist, Mode=TwoWay}">
+                
+                <TabControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <StackPanel.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Rename Playlist" 
+                                              Command="{Binding DataContext.RenamePlaylistCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              CommandParameter="{Binding}"/>
+                                    <Separator/>
+                                    <MenuItem Header="Delete Playlist" 
+                                              Foreground="{StaticResource DangerBrush}"
+                                              Command="{Binding DataContext.RemovePlaylistCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              CommandParameter="{Binding}"/>
+                                </ContextMenu>
+                            </StackPanel.ContextMenu>
+                            
+                            <Ellipse x:Name="PlayingDot" Width="8" Height="8" Margin="0,0,6,0"
+                                     VerticalAlignment="Center" Fill="{StaticResource PlayingGreenBrush}">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasPlayingCue}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <fa:IconBlock x:Name="TabIcon" Icon="Music" Margin="0,0,8,0" FontSize="14" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Name}" 
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"
+                                       VerticalAlignment="Center"/>
+                            
+                            <!-- Close Button -->
+                            <Button Margin="12,0,0,0" Padding="4"
+                                    Background="Transparent" BorderThickness="0"
+                                    Foreground="{StaticResource TextMutedBrush}"
+                                    Cursor="Hand" ToolTip="Close Playlist"
+                                    Command="{Binding DataContext.RemovePlaylistCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                    CommandParameter="{Binding}">
+                                <fa:IconBlock Icon="Xmark" FontSize="10"/>
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border Background="{TemplateBinding Background}" CornerRadius="2">
+                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" Value="{StaticResource BorderStrongBrush}"/>
+                                                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </StackPanel>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsVideo}" Value="True">
+                                <Setter TargetName="TabIcon" Property="Icon" Value="Video"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsKaraoke}" Value="True">
+                                <Setter TargetName="TabIcon" Property="Icon" Value="Microphone"/>
+                                <Setter TargetName="TabIcon" Property="Foreground" Value="{StaticResource SuccessBrush}"/>
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </TabControl.ItemTemplate>
+                
+                <TabControl.ContentTemplate>
+                    <DataTemplate>
+                        <!-- Virtualized cue card grid -->
+                        <ScrollViewer x:Name="CueScrollViewer" VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      CanContentScroll="True"
+                                      PanningMode="VerticalOnly"
+                                      Margin="0,8,0,0">
+                            <ItemsControl ItemsSource="{Binding DataContext.FilteredCues, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          VirtualizingPanel.IsVirtualizing="True"
+                                          VirtualizingPanel.VirtualizationMode="Recycling"
+                                          VirtualizingPanel.ScrollUnit="Pixel">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <controls:VirtualizingWrapPanel
+                                            x:Name="CueWrapPanel"
+                                            ItemWidth="{Binding DataContext.CueItemWidth, Source={x:Reference MainRoot}}"
+                                            ItemHeight="{Binding DataContext.CueItemHeight, Source={x:Reference MainRoot}}"
+                                            IsItemsHost="True"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:CueCardViewModel}">
+                                        <Viewbox Width="{Binding DataContext.CueItemWidth, Source={x:Reference MainRoot}}"
+                                                 Height="{Binding DataContext.CueItemHeight, Source={x:Reference MainRoot}}"
+                                                 Stretch="Uniform" StretchDirection="Both">
+                                            <controls:CueCardControl/>
+                                        </Viewbox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsKaraoke}" Value="True">
+                                <Setter TargetName="CueScrollViewer" Property="Visibility" Value="Hidden"/>
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </TabControl.ContentTemplate>
+            </TabControl>
+
+            <!-- KARAOKE MAIN PANEL -->
+            <Border Grid.Column="0" Margin="4,36,2,4" Background="{StaticResource BgBaseBrush}"
+                    CornerRadius="0,0,4,4"
+                    Visibility="{Binding SelectedPlaylist.IsKaraoke, Converter={StaticResource BoolVis}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Karaoke toolbar — WrapPanel co giãn khi kéo dãn cửa sổ -->
+                    <Border x:Name="KaraokeToolbarBorder" Grid.Row="0" Background="{StaticResource BgDeepBrush}"
+                            BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="0,0,0,1"
+                            Padding="6,6">
+                        <StackPanel>
+                            <!-- Hàng 1: status full width -->
+                            <DockPanel Margin="0,0,0,6" LastChildFill="True">
+                                <Ellipse x:Name="KaraokeStatusDot" DockPanel.Dock="Left"
+                                         Width="9" Height="9" Margin="2,0,8,0" VerticalAlignment="Center">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="#666666"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsKaraokeOutputOn}" Value="True">
+                                                    <Setter Property="Fill" Value="#00E676"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock x:Name="TxtKaraokeStatus"
+                                           Text="{Binding KaraokeStatusText}" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding KaraokeStatusText}"/>
+                            </DockPanel>
+
+                            <!-- Hàng 2: nút wrap khi hẹp -->
+                            <WrapPanel x:Name="KaraokeToolbarWrap" Orientation="Horizontal">
+                                <TextBox x:Name="TxtKaraokeSession"
+                                         Style="{StaticResource AppTextBoxStyle}"
+                                         Text="{Binding KaraokeSessionId, UpdateSourceTrigger=PropertyChanged}"
+                                         IsReadOnly="{Binding IsLedFrozen}"
+                                         IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                         Width="88" MinWidth="64" Height="30" Margin="0,0,6,6" FontSize="12" FontWeight="Bold"
+                                         ToolTip="Session operator"
+                                         VerticalAlignment="Center"/>
+                                <Button x:Name="BtnKaraokeNew" Content="Mới" Click="BtnKaraokeNewSession_Click"
+                                        IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                        Style="{StaticResource AppActionButtonStyle}" Height="30" Padding="10,0"
+                                        Background="{StaticResource BgElevatedBrush}"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
+                                        BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                                        Margin="0,0,6,6" FontSize="11" ToolTip="Session mới"/>
+                                <Button x:Name="BtnKaraokeSync" Content="Sync" Click="BtnKaraokeApply_Click"
+                                        IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                        Style="{StaticResource AppActionButtonStyle}" Height="30" Padding="10,0"
+                                        Background="{StaticResource BgElevatedBrush}"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
+                                        BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                                        Margin="0,0,6,6" FontSize="11" ToolTip="Đồng bộ URL"/>
+                                <Button x:Name="BtnKaraokeAutoNext"
+                                        Content="{Binding KaraokeAutoNextLabel}"
+                                        Click="BtnKaraokeAutoNext_Click"
+                                        IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                        Style="{StaticResource AppActionButtonStyle}" Height="30" Padding="10,0"
+                                        Background="{StaticResource AccentSubtleBrush}"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
+                                        BorderBrush="{StaticResource AccentPrimaryBrush}" BorderThickness="1"
+                                        MinWidth="72" Margin="0,0,6,6" FontSize="11" FontWeight="SemiBold"
+                                        ToolTip="Bật/tắt tự động chuyển sang bài tiếp theo trên WebView"/>
+                                <Button Content="PLAY" Click="BtnKaraokePlay_Click"
+                                        IsEnabled="{Binding IsKaraokeOutputOn}"
+                                        Style="{StaticResource AppActionButtonStyle}" Height="30" Padding="10,0"
+                                        Background="{StaticResource SuccessBrush}"
+                                        Foreground="White"
+                                        BorderBrush="{StaticResource SuccessBrush}" BorderThickness="1"
+                                        Margin="0,0,6,6" FontSize="10" FontWeight="Bold"
+                                        ToolTip="Phát/tiếp tục WebView Karaoke trên màn Output"/>
+                                <Button Content="PAUSE" Click="BtnKaraokePause_Click"
+                                        IsEnabled="{Binding IsKaraokeOutputOn}"
+                                        Style="{StaticResource AppActionButtonStyle}" Height="30" Padding="10,0"
+                                        Background="{StaticResource DangerBrush}"
+                                        Foreground="White"
+                                        BorderBrush="{StaticResource DangerBrush}" BorderThickness="1"
+                                        Margin="0,0,6,6" FontSize="10" FontWeight="Bold"
+                                        ToolTip="Tạm dừng toàn bộ media trong WebView Karaoke Output"/>
+                                <Button x:Name="BtnKaraokeToggleSecondary"
+                                        Content="{Binding KaraokeOnOffLabel}"
+                                        Click="BtnKaraokeToggleSecondary_Click"
+                                        MinWidth="100" Height="30" FontWeight="Bold" FontSize="11"
+                                        Margin="0,0,6,6"
+                                        ToolTip="KARAOKE ON/OFF (Ctrl+K)">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource AppActionButtonStyle}">
+                                            <Setter Property="Background" Value="{StaticResource SuccessBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding KaraokeOnOffIsDanger}" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <!-- Phóng to chỉ còn trên desk remote (control web) — bỏ nút toolbar trùng -->
+                                <ToggleButton x:Name="BtnKaraokeUrlsToggle"
+                                              Content="URL" Height="30" Padding="10,0" Margin="0,0,0,6" FontSize="11"
+                                              Background="{StaticResource BgElevatedBrush}"
+                                              Foreground="{StaticResource TextMutedBrush}"
+                                              BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1"
+                                              ToolTip="Hiện / ẩn URL remote &amp; player"/>
+                            </WrapPanel>
+
+                            <!-- URL chi tiết — ẩn mặc định -->
+                            <Grid x:Name="KaraokeUrlRow" Margin="0,2,0,0"
+                                  Visibility="{Binding IsChecked, ElementName=BtnKaraokeUrlsToggle, Converter={StaticResource BoolVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" MinWidth="80"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*" MinWidth="80"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock x:Name="LblOperator" Text="Remote (operator)" FontSize="10"
+                                               Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,2"/>
+                                    <TextBox x:Name="TxtKaraokeControlUrl"
+                                             Style="{StaticResource AppTextBoxStyle}"
+                                             Text="{Binding KaraokeRemoteUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             FontSize="11" Height="28" MinWidth="80"
+                                             ToolTip="URL remote — không share"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock x:Name="LblOutput" Text="Player (master)" FontSize="10"
+                                               Foreground="{StaticResource TextMutedBrush}" Margin="0,0,0,2"/>
+                                    <TextBox x:Name="TxtKaraokeSecondaryUrl"
+                                             Style="{StaticResource AppTextBoxStyle}"
+                                             Text="{Binding KaraokePlayerUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             FontSize="11" Height="28" MinWidth="80"
+                                             ToolTip="URL player OUTPUT"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Browser fills remaining space -->
+                    <Border Grid.Row="1" Background="{StaticResource BgBaseBrush}"
+                            BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
+                        <wv2:WebView2 x:Name="KaraokeControlWebView"
+                                      DefaultBackgroundColor="#222222"/>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Drop hint (audio/video empty only — hide on karaoke) -->
+            <Border Background="Transparent"
+                    IsHitTestVisible="False">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding SelectedPlaylist.Cues.Count}" Value="0"/>
+                                    <Condition Binding="{Binding SearchText, Converter={StaticResource EmptyStringVis}}" Value="Collapsed"/>
+                                    <Condition Binding="{Binding SelectedPlaylist.IsKaraoke}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <fa:IconBlock Icon="CloudArrowUp" FontSize="40" HorizontalAlignment="Center"
+                                  Opacity="0.25" Foreground="{StaticResource TextMutedBrush}"/>
+                    <TextBlock Text="Kéo media hoặc thư mục vào đây" FontSize="15" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               HorizontalAlignment="Center" Margin="0,14,0,4"/>
+                    <TextBlock Text="App tự tách Audio và Video/Ảnh vào đúng tab"
+                               Foreground="{StaticResource TextMutedBrush}"
+                               FontSize="12" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Search có nội dung nhưng không khớp cue nào -->
+            <Border Background="Transparent" IsHitTestVisible="False">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding FilteredCues.Count}" Value="0"/>
+                                    <Condition Binding="{Binding SearchText, Converter={StaticResource EmptyStringVis}}" Value="Visible"/>
+                                    <Condition Binding="{Binding SelectedPlaylist.IsKaraoke}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <fa:IconBlock Icon="Search" FontSize="34" HorizontalAlignment="Center"
+                                  Opacity="0.28" Foreground="{StaticResource TextMutedBrush}"/>
+                    <TextBlock Text="Không tìm thấy cue phù hợp" FontSize="15" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               HorizontalAlignment="Center" Margin="0,12,0,4"/>
+                    <TextBlock Text="Xóa nội dung ô tìm kiếm để xem lại toàn bộ cue"
+                               Foreground="{StaticResource TextMutedBrush}"
+                               FontSize="12" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Import progress overlay -->
+            <Border x:Name="ImportOverlay"
+                    Background="{StaticResource OverlayBrush}"
+                    Visibility="{Binding IsImporting, Converter={StaticResource BoolVis}}"
+                    Panel.ZIndex="10">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="Đang thêm media…"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               FontSize="18" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                    <ProgressBar Value="{Binding ImportProgress}" Maximum="100"
+                                 Width="400" Height="8"
+                                 Foreground="{StaticResource AccentPrimaryBrush}"
+                                 Background="{StaticResource BgElevatedBrush}"
+                                 BorderThickness="0"/>
+                    <TextBlock Text="{Binding ImportCurrentFile}"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="12" HorizontalAlignment="Center" Margin="0,8,0,0"
+                               TextTrimming="CharacterEllipsis" MaxWidth="400"/>
+                    <TextBlock Foreground="{StaticResource TextMutedBrush}"
+                               FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0">
+                        <Run Text="{Binding ImportProgress}"/>
+                        <Run Text="% complete"/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <!-- Splitter (kéo co panel preview) -->
+            <GridSplitter x:Name="PreviewSplitter" Grid.Column="1"
+                          Width="6" HorizontalAlignment="Stretch"
+                          Background="{StaticResource BorderSubtleBrush}"
+                          Cursor="SizeWE" Panel.ZIndex="5"
+                          ResizeBehavior="PreviousAndNext"
+                          Visibility="{Binding IsLivePreviewVisible, Converter={StaticResource BoolVis}}"/>
+
+            <!-- LIVE PREVIEW — co giãn theo cột / cửa sổ -->
+            <Border x:Name="PreviewSidePanel" Grid.Column="2" Margin="0,4,4,4"
+                    VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                    Background="{StaticResource BgDeepBrush}"
+                    BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1"
+                    CornerRadius="4"
+                    Visibility="{Binding IsLivePreviewVisible, Converter={StaticResource BoolVis}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*" MinHeight="100"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Title: màn BẠN xem (mirror màn KHÁCH) -->
+                    <Border Grid.Row="0" Padding="12,10" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
+                        <DockPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Preview" FontSize="13" FontWeight="Bold"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text=" · mirror VIEW" FontSize="11"
+                                           Foreground="{StaticResource TextMutedBrush}"
+                                           VerticalAlignment="Center" Margin="4,0,0,0"/>
+                            </StackPanel>
+                            <Border DockPanel.Dock="Right" CornerRadius="10" Padding="10,4" VerticalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#444"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsOutputPlaying}" Value="True">
+                                                <Setter Property="Background" Value="#1A00E676"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsVideoOutputEnabled}" Value="True">
+                                                <Setter Property="Background" Value="#44FFC107"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="8" Height="8" Margin="0,0,6,0" VerticalAlignment="Center">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="#999"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsOutputPlaying}" Value="True">
+                                                        <Setter Property="Fill" Value="{StaticResource PlayingGreenBrush}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsVideoOutputEnabled}" Value="True">
+                                                        <Setter Property="Fill" Value="#FFC107"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock Text="{Binding OutputStatusText}" FontSize="12" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Full HD preview — chiều cao theo 16:9 của chiều rộng panel -->
+                    <Border x:Name="PreviewFrameBorder" Grid.Row="1" Margin="8" Background="#0A0A0A"
+                            BorderBrush="{StaticResource BorderDefaultBrush}" BorderThickness="1"
+                            CornerRadius="3" ClipToBounds="True" MinHeight="100"
+                            SizeChanged="PreviewFrameBorder_SizeChanged">
+                        <Grid>
+                            <StackPanel x:Name="PreviewPlaceholder"
+                                        VerticalAlignment="Center" HorizontalAlignment="Center" Opacity="0.85">
+                                <fa:IconBlock Icon="Display" FontSize="22" Foreground="{StaticResource TextMutedBrush}"
+                                              HorizontalAlignment="Center"/>
+                                <TextBlock Text="{Binding SelectedVideoScreen.ShortName, FallbackValue='Chưa chọn màn OUTPUT'}"
+                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                                           HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                                <TextBlock Text="2 màn song song"
+                                           Foreground="{StaticResource TextPrimaryBrush}" FontSize="12" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" Margin="0,10,0,0"/>
+                                <TextBlock Text="Preview mirror trực tiếp cửa sổ OUTPUT"
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="11"
+                                           HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                                <TextBlock Text="Standby, video, ảnh và Karaoke đều giống màn khách"
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="10"
+                                           HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                            </StackPanel>
+                            <!-- All Program sources mirror the OutputWindow HWND through DWM. -->
+                            <helpers:DwmThumbnailHost x:Name="KaraokeDwmHost"
+                                   Visibility="Collapsed"
+                                   IsHitTestVisible="False"
+                                   HorizontalAlignment="Stretch"
+                                   VerticalAlignment="Stretch"/>
+                            <!-- Fallback capture when DWM thumbnail registration is unavailable. -->
+                            <Image x:Name="KaraokeCaptureImage"
+                                   Stretch="Uniform"
+                                   Visibility="Collapsed"
+                                   IsHitTestVisible="False"
+                                   HorizontalAlignment="Stretch"
+                                   VerticalAlignment="Stretch"
+                                   SnapsToDevicePixels="True"
+                                   RenderOptions.BitmapScalingMode="LowQuality"/>
+                            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                    Margin="0,0,6,6" Background="#99000000" CornerRadius="3" Padding="6,2"
+                                    IsHitTestVisible="False">
+                                <TextBlock FontSize="10" Foreground="#CCFFFFFF" FontFamily="Consolas">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="1920×1080"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsKaraokeOutputOn}" Value="True">
+                                                    <Setter Property="Text" Value="LIVE · = OUTPUT"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsVideoOutputEnabled}" Value="True">
+                                                    <Setter Property="Text" Value="VIDEO · = OUTPUT"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- Quick actions — ZIndex cao, Click + Command (không bị WebView che) -->
+                    <Border Grid.Row="2" Background="{StaticResource BgDeepBrush}"
+                            Padding="10,6,10,10" Panel.ZIndex="20"
+                            IsHitTestVisible="True">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                      MaxHeight="520">
+                        <StackPanel>
+                            <TextBlock Text="Thao tác nhanh" FontSize="12" FontWeight="Bold"
+                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+
+                            <Button x:Name="BtnQuickArm" Height="40" Margin="0,0,0,6" Cursor="Hand"
+                                    Click="BtnQuickArm_Click"
+                                    IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                    ToolTip="Bật / tắt màn output video">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd" Background="{StaticResource BgPanelBrush}"
+                                                BorderBrush="{StaticResource BorderStrongBrush}"
+                                                BorderThickness="1" CornerRadius="6" Padding="12,0">
+                                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSubtleBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <StackPanel Orientation="Horizontal" IsHitTestVisible="False">
+                                    <fa:IconBlock Icon="PowerOff" FontSize="14" Margin="0,0,10,0" VerticalAlignment="Center"
+                                                  Foreground="{StaticResource WarningBrush}"/>
+                                    <TextBlock VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="Bật màn output"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding DataContext.IsVideoOutputEnabled, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                                        <Setter Property="Text" Value="Tắt màn output"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Button>
+
+                            <Border Margin="0,2,0,8" Padding="8" CornerRadius="6"
+                                    Background="#161D27" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                    BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Text="LED EVENT" FontSize="11" FontWeight="Bold"
+                                               Foreground="{StaticResource WarningBrush}" Margin="0,0,0,6"/>
+                                    <ComboBox ItemsSource="{Binding LedProfiles}"
+                                              SelectedItem="{Binding SelectedLedProfile, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                              DisplayMemberPath="Name"
+                                              Style="{StaticResource DarkComboBoxStyle}" Height="30"/>
+                                    <TextBlock Text="{Binding SelectedLedProfile.Readout}"
+                                               Foreground="{StaticResource TextMutedBrush}" FontSize="10"
+                                               Margin="2,3,0,6"/>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="6"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding LedCustomCanvasWidth, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                                 ToolTip="Custom canvas width" Height="28" Padding="6,3"/>
+                                        <TextBox Grid.Column="2" Text="{Binding LedCustomCanvasHeight, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                                 ToolTip="Custom canvas height" Height="28" Padding="6,3"/>
+                                    </Grid>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox Grid.Column="0" ItemsSource="{Binding LedScalingModes}"
+                                                  SelectedItem="{Binding LedCustomScalingMode, Mode=TwoWay}"
+                                                  IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                                  Style="{StaticResource DarkComboBoxStyle}" Height="28"/>
+                                        <Button Grid.Column="1" Content="APPLY CUSTOM" Margin="6,0,0,0" Padding="7,2"
+                                                IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                                Command="{Binding ApplyCustomLedProfileCommand}"/>
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox Grid.Column="0" ItemsSource="{Binding LedTestPatterns}"
+                                                  SelectedItem="{Binding SelectedLedTestPattern, Mode=TwoWay}"
+                                                  IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                                  Style="{StaticResource DarkComboBoxStyle}" Height="28"/>
+                                        <Button Grid.Column="1" Content="SHOW" Margin="6,0,0,0" Padding="7,2"
+                                                IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                                Command="{Binding ShowSelectedLedTestPatternCommand}"/>
+                                        <Button Grid.Column="2" Content="CLEAR" Margin="4,0,0,0" Padding="7,2"
+                                                Command="{Binding ClearLedTestPatternCommand}"/>
+                                    </Grid>
+
+                                    <UniformGrid Columns="2" Margin="0,0,0,6">
+                                        <Button Content="STANDBY" Margin="0,0,3,3" Height="30"
+                                                Command="{Binding ShowLedStandbyCommand}"/>
+                                        <Button Margin="3,0,0,3" Height="30"
+                                                Command="{Binding ToggleLedFreezeCommand}">
+                                            <TextBlock>
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Text" Value="FREEZE"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsLedFrozen}" Value="True">
+                                                                <Setter Property="Text" Value="UNFREEZE"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Button>
+                                    </UniformGrid>
+                                    <Button Content="PREFLIGHT" Height="30" Command="{Binding RunLedPreflightCommand}"/>
+                                    <TextBlock Text="{Binding LedPreflightStatus}" TextWrapping="Wrap"
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="10"
+                                               Margin="2,5,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Button x:Name="BtnQuickSafeScene" Height="48" Margin="0,0,0,8" Cursor="Hand"
+                                    Command="{Binding ShowEmergencySafeSceneCommand}"
+                                    ToolTip="Đưa Program về ảnh cứu hộ/logo ngay lập tức (Ctrl+Shift+S)">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd" Background="#B42318" BorderBrush="#FF7A66"
+                                                BorderThickness="1" CornerRadius="7" Padding="12,0">
+                                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#D13A2F"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#8F1C14"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <StackPanel Orientation="Horizontal" IsHitTestVisible="False">
+                                    <fa:IconBlock Icon="TriangleExclamation" FontSize="16" Margin="0,0,10,0"
+                                                  VerticalAlignment="Center" Foreground="White"/>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="SAFE SCENE" FontSize="13" FontWeight="Bold" Foreground="White"/>
+                                        <TextBlock Text="Ctrl+Shift+S · giữ audio" FontSize="9" Foreground="#FFE3DE"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Button>
+
+                            <Button x:Name="BtnQuickBlackout" Height="40" Margin="0,0,0,6" Cursor="Hand"
+                                    Command="{Binding ToggleLedBlackoutCommand}"
+                                    ToolTip="Safety blackout toàn bộ output">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd" Background="{StaticResource BgPanelBrush}"
+                                                BorderBrush="{StaticResource BorderStrongBrush}"
+                                                BorderThickness="1" CornerRadius="6" Padding="12,0">
+                                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSubtleBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <StackPanel Orientation="Horizontal" IsHitTestVisible="False">
+                                    <fa:IconBlock Icon="Moon" FontSize="14" Margin="0,0,10,0" VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextPrimaryBrush}"/>
+                                    <TextBlock FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextPrimaryBrush}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="BLACKOUT"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsLedBlackout}" Value="True">
+                                                        <Setter Property="Text" Value="CLEAR BLACKOUT"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Button>
+
+                            <Button x:Name="BtnQuickStopAll" Height="40" Cursor="Hand"
+                                    Click="BtnQuickStopAll_Click"
+                                    ToolTip="Tắt tất cả (Shift+Esc)">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd" Background="#33E74C3C"
+                                                BorderBrush="#88E74C3C"
+                                                BorderThickness="1" CornerRadius="6" Padding="12,0">
+                                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#55E74C3C"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <StackPanel Orientation="Horizontal" IsHitTestVisible="False">
+                                    <fa:IconBlock Icon="Ban" FontSize="14" Margin="0,0,10,0" VerticalAlignment="Center"
+                                                  Foreground="{StaticResource DangerBrush}"/>
+                                    <TextBlock Text="Tắt tất cả" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                                               Foreground="{StaticResource DangerBrush}"/>
+                                </StackPanel>
+                            </Button>
+
+                            <TextBlock Margin="0,12,0,0" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
+                                       TextWrapping="Wrap" LineHeight="18"
+                                       Text="Ctrl+Shift+S = Safe Scene · B = màn đen · Esc = tắt tab"/>
+                        </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Footer screen info -->
+                    <Border Grid.Row="3" Padding="12,10" Background="{StaticResource BgPanelBrush}"
+                            BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
+                        <TextBlock FontSize="12" Foreground="{StaticResource TextPrimaryBrush}"
+                                   Text="{Binding SelectedVideoScreen.DisplayName, FallbackValue='Chưa chọn màn'}"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </Border>
+                </Grid>
+            </Border>
+
+        </Grid>
+
+        <Grid x:Name="MixerWorkspaceGrid" Grid.Row="1" Margin="10"
+              Visibility="{Binding IsMixerWorkspace, Converter={StaticResource BoolVis}}">
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="MixerMonitorRow" Height="320"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition x:Name="MixerTransitionColumn" Width="96"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Row="0" Grid.Column="0" Margin="0,0,6,6" Background="#08140D"
+                    BorderBrush="#31C86A" BorderThickness="2" CornerRadius="7" Padding="6">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="PREVIEW" Foreground="#63E892" FontSize="14" FontWeight="Bold"/>
+                    <Grid x:Name="MixerPreviewGrid" Grid.Row="1" Margin="0,5" Background="Black" ClipToBounds="True">
+                        <MediaElement x:Name="MixerPreviewVideo" LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                                      Stretch="Uniform" IsMuted="True" Volume="0" Visibility="Collapsed"/>
+                        <Image x:Name="MixerPreviewImage" Stretch="Uniform" Visibility="Collapsed"/>
+                    </Grid>
+                    <TextBlock Grid.Row="2" Text="{Binding MixerPreviewInput.Title, FallbackValue='No input'}"
+                               Foreground="White" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                </Grid>
+            </Border>
+
+            <StackPanel Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" Margin="4,2">
+                <TextBlock Text="FADE" Foreground="{StaticResource TextMutedBrush}" FontSize="9"
+                           FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,2"/>
+                <Grid Height="27" Margin="0,0,0,3">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <ComboBox ItemsSource="{Binding MixerTransitionDurations}"
+                              SelectedItem="{Binding MixerTransitionDurationMs, Mode=TwoWay}"
+                              Style="{StaticResource DarkComboBoxStyle}" Height="27" FontSize="10"
+                              ToolTip="Fade-through-black duration for TAKE"/>
+                    <TextBlock Grid.Column="1" Text="ms" Foreground="{StaticResource TextMutedBrush}"
+                               FontSize="8" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                </Grid>
+                <Button x:Name="MixerFadeButton" Content="TAKE" Command="{Binding MixerFadeCommand}"
+                        Height="34" Margin="0,0,0,3" FontSize="13" FontWeight="Bold"
+                        Background="#146B50" Foreground="White" ToolTip="Fade Preview through black to Program"/>
+                <Button x:Name="MixerCutButton" Content="CUT" Command="{Binding MixerCutCommand}"
+                        Height="30" Margin="0,0,0,3" FontSize="12" FontWeight="Bold"
+                        Background="#B71C1C" Foreground="White" ToolTip="Cắt thẳng Preview sang Program"/>
+                <Button Content="SWAP" Command="{Binding MixerSwapCommand}" Height="27" Margin="0,0,0,3"
+                        Padding="1" FontSize="9" FontWeight="Bold"
+                        ToolTip="Đưa Preview lên Program và trả Program cũ về Preview"/>
+                <Button Content="FTB" Command="{Binding MixerToggleFadeToBlackCommand}" Height="30"
+                        FontSize="11" FontWeight="Bold" Foreground="White" ToolTip="Fade To Black">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Background" Value="#3A2020"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsMixerFadeToBlack}" Value="True">
+                                    <Setter Property="Background" Value="#D71920"/>
+                                    <Setter Property="BorderBrush" Value="#FF7777"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </StackPanel>
+
+            <Border Grid.Row="0" Grid.Column="2" Margin="6,0,0,6" Background="#160909"
+                    BorderBrush="#EF4040" BorderThickness="2" CornerRadius="7" Padding="6">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="PROGRAM" Foreground="#FF6262" FontSize="14" FontWeight="Bold"
+                                       VerticalAlignment="Center"/>
+                            <Border Background="#4A1717" BorderBrush="#EF4040" BorderThickness="1"
+                                    CornerRadius="9" Padding="8,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Foreground="#FFB2B2" FontSize="10" FontWeight="Bold">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="OUTPUT OFF"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsVideoOutputEnabled}" Value="True">
+                                                    <Setter Property="Text" Value="ON AIR"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel x:Name="MixerProgramRoutePanel" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- Dynamic screen select buttons (MÀN 1, MÀN 2, etc.) -->
+                            <ItemsControl ItemsSource="{Binding VideoScreens}" IsEnabled="{Binding IsShowConfigurationEnabled}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Margin="0,0,6,0" Padding="12,0" Height="26" MinWidth="68"
+                                                Command="{Binding DataContext.SelectScreenAndStartOutputCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip="{Binding DisplayName}">
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="Border" CornerRadius="4" SnapsToDevicePixels="True">
+                                                        <Border.Background>
+                                                            <MultiBinding Converter="{StaticResource ScreenActiveBrushConverter}">
+                                                                <Binding Path="DataContext.SelectedVideoScreen" RelativeSource="{RelativeSource AncestorType=ItemsControl}"/>
+                                                                <Binding Path="."/>
+                                                                <Binding Path="DataContext.IsVideoOutputEnabled" RelativeSource="{RelativeSource AncestorType=ItemsControl}"/>
+                                                            </MultiBinding>
+                                                        </Border.Background>
+                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="Border" Property="Opacity" Value="0.9"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsPressed" Value="True">
+                                                            <Setter TargetName="Border" Property="Opacity" Value="0.75"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                            <TextBlock Text="{Binding Index, StringFormat='MÀN {0}'}" 
+                                                       Foreground="White" FontSize="10" FontWeight="Bold"
+                                                       VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <CheckBox x:Name="MixerOutputToggle" Content="OUTPUT" IsChecked="{Binding IsVideoOutputEnabled, Mode=TwoWay}"
+                                        IsEnabled="{Binding IsShowConfigurationEnabled}"
+                                        Foreground="#FF8A8A" FontSize="10" FontWeight="Bold"
+                                        VerticalAlignment="Center" Margin="5,0,2,0"
+                                        ToolTip="Bật hoặc tắt cửa sổ Program trên màn đã chọn"/>
+                        </StackPanel>
+                    </Grid>
+                    <Grid Grid.Row="1" Margin="0,5" Background="Black" ClipToBounds="True">
+                        <Grid.ContextMenu>
+                            <ContextMenu Opened="ProgramContextMenu_Opened">
+                                <!-- Mo khung chieu chuong trinh (Submenu) -->
+                                <MenuItem x:Name="ProjectorMenuItem" Header="Mo khung chieu chuong trinh"/>
+                                <Separator/>
+                                <MenuItem Header="Chup man hinh (Chuong trinh)"
+                                          Command="{Binding CaptureOutputScreenshotCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="[X]  Tat Output"
+                                          Command="{Binding DisableOutputCommand}"
+                                          Foreground="#FF5252"/>
+                            </ContextMenu>
+                        </Grid.ContextMenu>
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False">
+                            <fa:IconBlock Icon="Display" FontSize="28" Foreground="#55FF6262"
+                                          HorizontalAlignment="Center"/>
+                            <TextBlock Text="PROGRAM OUTPUT" Foreground="#66FFFFFF" HorizontalAlignment="Center"
+                                       Margin="0,8,0,0" FontWeight="Bold"/>
+                            <TextBlock Text="Chuot phai -&gt; chon man chieu" Foreground="#44FFFFFF"
+                                       HorizontalAlignment="Center" Margin="0,4,0,0" FontSize="10"/>
+                        </StackPanel>
+                        <Image x:Name="MixerProgramCaptureImage" Stretch="Uniform" Visibility="Collapsed"
+                               IsHitTestVisible="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                               SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="LowQuality"/>
+                        <helpers:DwmThumbnailHost x:Name="MixerProgramDwmHost" Visibility="Collapsed"
+                                                  IsHitTestVisible="False" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                    </Grid>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding MixerProgramTitle}" Foreground="White" FontSize="12"
+                                   FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="MixerProgramScreenText" Grid.Column="1" Text="{Binding SelectedVideoScreen.DisplayName}"
+                                   Foreground="#AAFF8A8A" FontSize="10" VerticalAlignment="Center"
+                                   Margin="12,0,0,0" TextTrimming="CharacterEllipsis" MaxWidth="220"/>
+                    </Grid>
+                    <Border Grid.Row="3" Margin="0,4,0,0" Padding="4,3" Background="#260C0C"
+                            BorderBrush="#553030" BorderThickness="1" CornerRadius="4">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="17"/>
+                                <RowDefinition Height="27"/>
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="38"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="44"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding MixerProgramInput.Elapsed, FallbackValue='0:00'}"
+                                           Foreground="#FFE1E1" FontFamily="Consolas" FontSize="9"
+                                           VerticalAlignment="Center"/>
+                                <Slider x:Name="MixerProgramSeekSlider" Grid.Column="1" Minimum="0" Maximum="1"
+                                        Value="{Binding MixerProgramInput.Position, Mode=OneWay}"
+                                        Style="{StaticResource ProgressSliderStyle}" Height="12"
+                                         IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                                         PreviewMouseDown="MixerProgramSeekSlider_PreviewMouseDown"
+                                         PreviewMouseUp="MixerProgramSeekSlider_PreviewMouseUp"
+                                         LostMouseCapture="MixerProgramSeekSlider_LostMouseCapture"
+                                         ToolTip="Seek Program"/>
+                                <TextBlock Grid.Column="2" Text="{Binding MixerProgramInput.Remaining, FallbackValue='-0:00'}"
+                                           Foreground="#FF9B9B" FontFamily="Consolas" FontSize="9"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
+                            <Grid Grid.Row="1" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="36"/>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="30"/>
+                                    <ColumnDefinition Width="38"/>
+                                    <ColumnDefinition Width="40"/>
+                                    <ColumnDefinition Width="*" MinWidth="32"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Content="-5" Command="{Binding MixerSkipBackwardCommand}" Margin="0,0,2,0"
+                                        Padding="1" FontSize="9" FontWeight="Bold" ToolTip="Lùi 5 giây"/>
+                                <Button Grid.Column="1" Command="{Binding MixerToggleProgramPauseCommand}" Margin="0,0,2,0"
+                                        Padding="1" FontSize="8" FontWeight="Bold" ToolTip="Pause hoặc Resume Program">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Content" Value="PAUSE"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MixerProgramInput.IsPaused}" Value="True">
+                                                    <Setter Property="Content" Value="PLAY"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Grid.Column="2" Content="R" Command="{Binding MixerRestartProgramCommand}" Margin="0,0,2,0"
+                                        Padding="1" FontSize="9" FontWeight="Bold" ToolTip="Phát lại Program từ đầu"/>
+                                <Button Grid.Column="3" Content="+5" Command="{Binding MixerSkipForwardCommand}" Margin="0,0,2,0"
+                                        Padding="1" FontSize="9" FontWeight="Bold" ToolTip="Tiến 5 giây"/>
+                                <Button Grid.Column="4" Content="LOOP" Command="{Binding MixerToggleProgramLoopCommand}" Margin="0,0,2,0"
+                                        Padding="1" FontSize="7.5" FontWeight="Bold" ToolTip="Bật hoặc tắt lặp Program">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Background" Value="#263238"/>
+                                            <Setter Property="Foreground" Value="White"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MixerProgramInput.IsMixerLoopEnabled}" Value="True">
+                                                    <Setter Property="Background" Value="#146B50"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Button Grid.Column="5" Command="{Binding MixerToggleProgramMuteCommand}" Margin="0,0,3,0"
+                                        Padding="1" FontSize="7.5" FontWeight="Bold" ToolTip="Tắt hoặc bật tiếng Program">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Content" Value="MUTE"/>
+                                            <Setter Property="Background" Value="#263238"/>
+                                            <Setter Property="Foreground" Value="White"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsMixerProgramMuted}" Value="True">
+                                                    <Setter Property="Background" Value="#B71C1C"/>
+                                                    <Setter Property="Content" Value="MUTED"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                                <Slider x:Name="MixerProgramVolumeSlider" Grid.Column="6" Minimum="0" Maximum="1"
+                                        Value="{Binding MixerProgramInput.Volume, Mode=OneWay}"
+                                         Style="{StaticResource HorizontalSliderStyle}" Height="18"
+                                         IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                                         PreviewMouseDown="MixerProgramVolumeSlider_PreviewMouseDown"
+                                         PreviewMouseUp="MixerProgramVolumeSlider_PreviewMouseUp"
+                                         LostMouseCapture="MixerProgramVolumeSlider_LostMouseCapture"
+                                        ToolTip="Âm lượng Program"/>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1" Grid.ColumnSpan="3" Background="#11161C" BorderBrush="{StaticResource BorderStrongBrush}"
+                    BorderThickness="1" CornerRadius="7" Padding="7">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- DANH MỤC -->
+                    <Grid Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header -->
+                        <DockPanel Margin="2,0,2,6">
+                            <TextBlock Text="DANH MỤC" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="Bold" VerticalAlignment="Center"/>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" Margin="4,0,0,0">
+                                <!-- Add Audio Category -->
+                                <Button ToolTip="Thêm danh mục Audio"
+                                        Command="{Binding AddPlaylistCommand}"
+                                        Background="Transparent" BorderThickness="0" Padding="4,2" Cursor="Hand">
+                                    <StackPanel Orientation="Horizontal">
+                                        <fa:IconBlock Icon="Music" FontSize="10" Foreground="#6C63FF" VerticalAlignment="Center"/>
+                                        <fa:IconBlock Icon="Plus" FontSize="10" Foreground="#6C63FF" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                    </StackPanel>
+                                </Button>
+                                <!-- Add Video Category -->
+                                <Button ToolTip="Thêm danh mục Video"
+                                        Command="{Binding AddVideoPlaylistCommand}"
+                                        Background="Transparent" BorderThickness="0" Padding="4,2" Cursor="Hand">
+                                    <StackPanel Orientation="Horizontal">
+                                        <fa:IconBlock Icon="Film" FontSize="10" Foreground="#FF5252" VerticalAlignment="Center"/>
+                                        <fa:IconBlock Icon="Plus" FontSize="10" Foreground="#FF5252" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Category List -->
+                        <Border Grid.Row="1" Background="#0A0D11" BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="4">
+                            <ListBox x:Name="MixerCategoryList"
+                                     ItemsSource="{Binding Playlists}"
+                                     SelectedItem="{Binding SelectedPlaylist, Mode=TwoWay}"
+                                     Background="Transparent" BorderThickness="0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="10,8"/>
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="0"/>
+                                        <Setter Property="Cursor" Value="Hand"/>
+                                        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="ContextMenu">
+                                            <Setter.Value>
+                                                <ContextMenu>
+                                                    <MenuItem Header="✏ Đổi tên"
+                                                              Command="{Binding DataContext.RenamePlaylistCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              CommandParameter="{Binding}"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="🗑 Xóa danh mục"
+                                                              Command="{Binding DataContext.RemovePlaylistCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              CommandParameter="{Binding}"
+                                                              Foreground="#FF5252"/>
+                                                </ContextMenu>
+                                            </Setter.Value>
+                                        </Setter>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter Property="Background" Value="#1A3A25"/>
+                                                <Setter Property="Foreground" Value="White"/>
+                                            </Trigger>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="#2A2D33"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel>
+                                            <!-- Type icon -->
+                                            <fa:IconBlock DockPanel.Dock="Left" Margin="0,0,7,0" FontSize="13" VerticalAlignment="Center">
+                                                <fa:IconBlock.Style>
+                                                    <Style TargetType="fa:IconBlock">
+                                                        <Setter Property="Icon" Value="Music"/>
+                                                        <Setter Property="Foreground" Value="#6C63FF"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Type}" Value="Video">
+                                                                <Setter Property="Icon" Value="Film"/>
+                                                                <Setter Property="Foreground" Value="#FF5252"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Type}" Value="Karaoke">
+                                                                <Setter Property="Icon" Value="Microphone"/>
+                                                                <Setter Property="Foreground" Value="#FFB300"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </fa:IconBlock.Style>
+                                            </fa:IconBlock>
+                                            <!-- Name + count -->
+                                            <TextBlock DockPanel.Dock="Right" Margin="4,0,0,0"
+                                                       Text="{Binding Cues.Count, StringFormat={}({0})}"
+                                                       Foreground="#555" FontSize="10" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+
+                        <!-- Bottom toolbar: Rename / Delete selected -->
+                        <Border Grid.Row="2" Background="#0D1016" CornerRadius="0,0,4,4"
+                                BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1,0,1,1"
+                                Padding="4,4">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right"
+                                        ToolTip="Xóa danh mục đang chọn"
+                                        Command="{Binding RemovePlaylistCommand}"
+                                        CommandParameter="{Binding SelectedPlaylist}"
+                                        Background="Transparent" BorderThickness="0" Padding="6,3" Cursor="Hand">
+                                    <fa:IconBlock Icon="Trash" FontSize="12" Foreground="#FF5252"/>
+                                </Button>
+                                <Button DockPanel.Dock="Right" Margin="0,0,4,0"
+                                        ToolTip="Đổi tên danh mục đang chọn"
+                                        Command="{Binding RenamePlaylistCommand}"
+                                        CommandParameter="{Binding SelectedPlaylist}"
+                                        Background="Transparent" BorderThickness="0" Padding="6,3" Cursor="Hand">
+                                    <fa:IconBlock Icon="Pen" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                </Button>
+                                <TextBlock Text="Click phải để đổi tên / xóa"
+                                           Foreground="#444" FontSize="9" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- INPUTS -->
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <DockPanel Margin="2,0,2,6">
+                            <TextBlock Text="NGUỒN (INPUTS)" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="Bold"/>
+                            <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                       Text="{Binding MixerInputs.Count, StringFormat={}{0} nguồn}"
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                        </DockPanel>
+                        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding MixerInputs}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Width="{Binding DataContext.MixerInputCardWidth, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Height="{Binding DataContext.MixerInputCardHeight, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Margin="0,0,7,7" Padding="0" Foreground="White"
+                                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                                            Command="{Binding DataContext.SelectMixerPreviewCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" ToolTip="{Binding Model.FilePath}">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Setter Property="Background" Value="#151B22"/>
+                                                <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                                                <Setter Property="BorderThickness" Value="1"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsMixerPreview}" Value="True">
+                                                        <Setter Property="Background" Value="#102A19"/>
+                                                        <Setter Property="BorderBrush" Value="#31C86A"/>
+                                                        <Setter Property="BorderThickness" Value="2"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsMixerProgram}" Value="True">
+                                                        <Setter Property="Background" Value="#351313"/>
+                                                        <Setter Property="BorderBrush" Value="#EF4040"/>
+                                                        <Setter Property="BorderThickness" Value="2"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="22"/>
+                                                <RowDefinition Height="*"/>
+                                                <RowDefinition Height="21"/>
+                                            </Grid.RowDefinitions>
+                                            <Border Background="{Binding ColorBrush}" Padding="6,0">
+                                                <Grid>
+                                                    <TextBlock Text="{Binding DisplayNumber, StringFormat=IN {0}}" FontSize="9"
+                                                               FontWeight="Bold" VerticalAlignment="Center" Foreground="White"/>
+                                                    <TextBlock Text="{Binding Title}" Margin="35,0,2,0" FontSize="10"
+                                                               FontWeight="SemiBold" VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis" Foreground="White"/>
+                                                </Grid>
+                                            </Border>
+                                            <Grid Grid.Row="1" Background="#050608" ClipToBounds="True">
+                                                <fa:IconBlock Icon="PlayCircle" FontSize="24" Foreground="#3FFFFFFF"
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                <Image Source="{Binding MixerThumbnail}"
+                                                       Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                                            VerticalAlignment="Top" Margin="0,4,4,0">
+                                                    <Border Background="#D9186D3A" CornerRadius="3" Padding="5,1" Margin="0,0,3,0"
+                                                            Visibility="{Binding IsMixerPreview, Converter={StaticResource BoolVis}}">
+                                                        <TextBlock Text="PVW" FontSize="8" FontWeight="Bold" Foreground="White"/>
+                                                    </Border>
+                                                    <Border Background="#D9B71C1C" CornerRadius="3" Padding="5,1"
+                                                            Visibility="{Binding IsMixerProgram, Converter={StaticResource BoolVis}}">
+                                                        <TextBlock Text="PGM" FontSize="8" FontWeight="Bold" Foreground="White"/>
+                                                    </Border>
+                                                </StackPanel>
+                                            </Grid>
+                                            <Grid Grid.Row="2" Margin="6,0">
+                                                <TextBlock Text="{Binding Duration}" FontSize="9" VerticalAlignment="Center"
+                                                           Foreground="{StaticResource TextMutedBrush}"/>
+                                                <TextBlock Text="{Binding StatusText}" FontSize="9" HorizontalAlignment="Right"
+                                                           VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                            </Grid>
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ══════════════ STATUS BAR ══════════════ -->
+        <Border Grid.Row="2" Background="{StaticResource BgDeepBrush}"
+                BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
+            <Grid Margin="12,0">
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="{StaticResource TextPrimaryBrush}"
+                           FontSize="12" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Foreground="{StaticResource DangerBrush}" FontSize="12" FontWeight="SemiBold"
+                               Margin="0,0,14,0"
+                               Visibility="{Binding MissingMediaCount, Converter={StaticResource NonZeroVis}}"
+                               Text="{Binding MissingMediaCount, StringFormat=⚠ {0} thiếu file}"/>
+                    <TextBlock Foreground="{StaticResource AccentPrimaryBrush}" FontSize="12" FontWeight="SemiBold"
+                               Margin="0,0,14,0" MaxWidth="220" TextTrimming="CharacterEllipsis"
+                               Text="{Binding NextTitle, StringFormat=Cue chờ: {0}}"/>
+                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,14,0"
+                               Text="{Binding OutputStatusText, StringFormat=Màn: {0}}"/>
+                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                               Text="{Binding FilteredCues.Count, StringFormat={}{0} cue}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+    </Grid>
+
+</Window>
