@@ -168,22 +168,24 @@ public sealed class GitHubUpdateService : IGitHubUpdateService, IDisposable
             : response.Content.Headers.ContentLength.GetValueOrDefault();
 
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var output = new FileStream(partialPath, FileMode.Create, FileAccess.Write,
-            FileShare.None, 1024 * 128, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[1024 * 128];
         long downloaded = 0;
-        while (true)
+        await using (var output = new FileStream(partialPath, FileMode.Create, FileAccess.Write,
+            FileShare.None, 1024 * 128, FileOptions.Asynchronous | FileOptions.SequentialScan))
         {
-            var read = await input.ReadAsync(buffer, cancellationToken);
-            if (read == 0) break;
-            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            sha256.AppendData(buffer, 0, read);
-            downloaded += read;
-            if (expectedSize > 0)
-                progress?.Report(Math.Clamp(downloaded / (double)expectedSize, 0, 1));
+            while (true)
+            {
+                var read = await input.ReadAsync(buffer, cancellationToken);
+                if (read == 0) break;
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                sha256.AppendData(buffer, 0, read);
+                downloaded += read;
+                if (expectedSize > 0)
+                    progress?.Report(Math.Clamp(downloaded / (double)expectedSize, 0, 1));
+            }
+            await output.FlushAsync(cancellationToken);
         }
-        await output.FlushAsync(cancellationToken);
 
         if (expectedSize > 0 && downloaded != expectedSize)
         {
