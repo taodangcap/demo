@@ -1,6 +1,4 @@
 using ManagedBass;
-using ManagedBass.Fx;
-using ManagedBass.Mix;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
@@ -18,6 +16,7 @@ public sealed class BassAudioEngine : IAudioEngine
     private bool _initialized;
     private int _currentDevice = -1;
     private bool _disposed;
+    private readonly object _lifecycleGate = new();
 
     public event EventHandler<int>? ChannelEnded;
 
@@ -30,8 +29,17 @@ public sealed class BassAudioEngine : IAudioEngine
 
     public bool Initialize(int deviceIndex = -1)
     {
+        lock (_lifecycleGate)
+        {
+            return InitializeCore(deviceIndex);
+        }
+    }
+
+    private bool InitializeCore(int deviceIndex)
+    {
         try
         {
+            if (_disposed) return false;
             if (_initialized) return true;
 
             Bass.UpdatePeriod = 5;
@@ -132,8 +140,6 @@ public sealed class BassAudioEngine : IAudioEngine
                 return false;
             }
 
-            // Touch BassFx to ensure DLL is loaded
-            var _ = BassFx.Version;
             _currentDevice = deviceIndex;
             _initialized = true;
             try
@@ -204,7 +210,7 @@ public sealed class BassAudioEngine : IAudioEngine
 
                     _initialized = false;
                     Bass.Free();
-                    if (Initialize(_currentDevice))
+                    if (InitializeCore(_currentDevice))
                     {
                         if (_currentDevice >= 0)
                         {
@@ -281,9 +287,14 @@ public sealed class BassAudioEngine : IAudioEngine
 
     public void Stop(int handle)
     {
-        if (!_channels.TryRemove(handle, out _)) return;
-        Bass.ChannelStop(handle);
-        Bass.StreamFree(handle);
+        lock (_lifecycleGate)
+        {
+            if (!_channels.TryRemove(handle, out _)) return;
+            if (!Bass.ChannelStop(handle))
+                _logger.LogDebug("BASS stop returned {Error} for handle {Handle}", Bass.LastError, handle);
+            if (!Bass.StreamFree(handle))
+                _logger.LogWarning("BASS stream free failed: {Error}; handle={Handle}", Bass.LastError, handle);
+        }
     }
 
     public void StopAll()
@@ -336,6 +347,7 @@ public sealed class BassAudioEngine : IAudioEngine
             LogDebug($"SetVolume: channel not found for handle {handle}");
             return;
         }
+        if (!double.IsFinite(volume)) volume = 0;
         float vol = (float)Math.Clamp(volume, 0, 1);
         bool ok = Bass.ChannelSetAttribute(handle, ChannelAttribute.Volume, vol);
         LogDebug($"SetVolume handle={handle} to {vol}: ok={ok}, LastError={Bass.LastError}");
@@ -356,6 +368,7 @@ public sealed class BassAudioEngine : IAudioEngine
 
     public void SetMasterVolume(double volume)
     {
+        if (!double.IsFinite(volume)) volume = 0;
         Bass.Volume = (float)Math.Clamp(volume, 0, 1);
     }
 
@@ -393,6 +406,14 @@ public sealed class BassAudioEngine : IAudioEngine
 
     public bool SwitchDevice(int deviceIndex)
     {
+        lock (_lifecycleGate)
+        {
+            return SwitchDeviceCore(deviceIndex);
+        }
+    }
+
+    private bool SwitchDeviceCore(int deviceIndex)
+    {
         try
         {
             if (_initialized && _currentDevice == deviceIndex)
@@ -402,7 +423,7 @@ public sealed class BassAudioEngine : IAudioEngine
             StopAll();
             Bass.Free();
             _initialized = false;
-            return Initialize(deviceIndex);
+            return InitializeCore(deviceIndex);
         }
         catch (Exception ex)
         {
@@ -413,10 +434,16 @@ public sealed class BassAudioEngine : IAudioEngine
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        StopAll();
-        Bass.Free();
+        lock (_lifecycleGate)
+        {
+            if (_disposed) return;
+            StopAll();
+            if (_initialized && !Bass.Free())
+                _logger.LogWarning("BASS shutdown failed: {Error}", Bass.LastError);
+            _initialized = false;
+            _currentDevice = -1;
+            _disposed = true;
+        }
     }
 
     private int GetBestDefaultDeviceIndex()

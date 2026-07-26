@@ -8,7 +8,6 @@
     <Color x:Key="BgBaseColor">#222222</Color>
     <Color x:Key="BgPanelColor">#2B2B2B</Color>
     <Color x:Key="BgCardColor">#333333</Color>
-    <Color x:Key="BgCardHoverColor">#3D3D3D</Color>
     <Color x:Key="BgElevatedColor">#444444</Color>
 
     <!-- ═══════════════════════════════════════════ -->
@@ -24,27 +23,20 @@
     <Color x:Key="TextPrimaryColor">#F5F5F5</Color>
     <Color x:Key="TextSecondaryColor">#C8C8C8</Color>
     <Color x:Key="TextMutedColor">#A0A0A0</Color>
-    <Color x:Key="TextDisabledColor">#707070</Color>
 
     <!-- ═══════════════════════════════════════════ -->
     <!--           ACCENT / BRAND (OBS Blue)        -->
     <!-- ═══════════════════════════════════════════ -->
     <Color x:Key="AccentPrimaryColor">#2478C8</Color>
-    <Color x:Key="AccentHoverColor">#2B87D7</Color>
-    <Color x:Key="AccentPressedColor">#1A5B9C</Color>
     <Color x:Key="AccentSubtleColor">#223344</Color>
 
     <!-- ═══════════════════════════════════════════ -->
     <!--           PLAYING STATE                    -->
     <!-- ═══════════════════════════════════════════ -->
     <Color x:Key="PlayingGreenColor">#00E676</Color>
-    <Color x:Key="PlayingGreenDimColor">#00B860</Color>
-    <Color x:Key="PlayingGlowColor">#3300E676</Color>
-    <Color x:Key="PlayingBgColor">#0D1E15</Color>
 
     <!-- Paused state -->
     <Color x:Key="PausedAmberColor">#FFB300</Color>
-    <Color x:Key="PausedBgColor">#1E180A</Color>
 
     <!-- ═══════════════════════════════════════════ -->
     <!--           SEMANTIC COLORS                  -->
@@ -52,7 +44,6 @@
     <Color x:Key="SuccessColor">#2ECC71</Color>
     <Color x:Key="WarningColor">#F39C12</Color>
     <Color x:Key="DangerColor">#E74C3C</Color>
-    <Color x:Key="InfoColor">#3498DB</Color>
 
     <!-- ═══════════════════════════════════════════ -->
     <!--           BRUSHES                          -->
@@ -61,7 +52,6 @@
     <SolidColorBrush x:Key="BgBaseBrush" Color="{StaticResource BgBaseColor}"/>
     <SolidColorBrush x:Key="BgPanelBrush" Color="{StaticResource BgPanelColor}"/>
     <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCardColor}"/>
-    <SolidColorBrush x:Key="BgCardHoverBrush" Color="{StaticResource BgCardHoverColor}"/>
     <SolidColorBrush x:Key="BgElevatedBrush" Color="{StaticResource BgElevatedColor}"/>
 
     <SolidColorBrush x:Key="BorderSubtleBrush" Color="{StaticResource BorderSubtleColor}"/>
@@ -71,36 +61,18 @@
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
     <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
-    <SolidColorBrush x:Key="TextDisabledBrush" Color="{StaticResource TextDisabledColor}"/>
 
     <SolidColorBrush x:Key="AccentPrimaryBrush" Color="{StaticResource AccentPrimaryColor}"/>
-    <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}"/>
     <SolidColorBrush x:Key="AccentSubtleBrush" Color="{StaticResource AccentSubtleColor}"/>
 
     <SolidColorBrush x:Key="PlayingGreenBrush" Color="{StaticResource PlayingGreenColor}"/>
-    <SolidColorBrush x:Key="PlayingGreenDimBrush" Color="{StaticResource PlayingGreenDimColor}"/>
     <SolidColorBrush x:Key="PausedAmberBrush" Color="{StaticResource PausedAmberColor}"/>
 
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
 
-    <!-- Toolbar gradient -->
-    <LinearGradientBrush x:Key="ToolbarGradientBrush" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#2B2B2B" Offset="0"/>
-        <GradientStop Color="#222222" Offset="1"/>
-    </LinearGradientBrush>
-
-    <!-- Card playing glow gradient -->
-    <RadialGradientBrush x:Key="PlayingGlowBrush" RadiusX="0.8" RadiusY="0.8">
-        <GradientStop Color="#2000E676" Offset="0"/>
-        <GradientStop Color="#00000000" Offset="1"/>
-    </RadialGradientBrush>
-
     <!-- Overlay dark -->
     <SolidColorBrush x:Key="OverlayBrush" Color="#B0000000"/>
-
-    <!-- Transparent -->
-    <SolidColorBrush x:Key="TransparentBrush" Color="Transparent"/>
 
 </ResourceDictionary>

@@ -17,21 +17,24 @@ public interface IDatabaseService
 /// </summary>
 public sealed class DatabaseService : IDatabaseService
 {
+    private const int CurrentSchemaVersion = 1;
     private readonly ILogger<DatabaseService> _logger;
     public string DatabasePath { get; }
 
     public DatabaseService(ILogger<DatabaseService> logger)
     {
         _logger = logger;
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var dir = Path.Combine(appData, "ShowCuePlayer");
         Directory.CreateDirectory(dir);
         DatabasePath = Path.Combine(dir, "showcueplayer.db");
+        MigrateLegacyDatabase(DatabasePath);
     }
 
     public SqliteConnection GetConnection()
     {
-        var conn = new SqliteConnection($"Data Source={DatabasePath}");
+        var builder = new SqliteConnectionStringBuilder { DataSource = DatabasePath, DefaultTimeout = 15 };
+        var conn = new SqliteConnection(builder.ToString());
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;";
@@ -42,9 +45,14 @@ public sealed class DatabaseService : IDatabaseService
     public async Task InitializeAsync()
     {
         _logger.LogInformation("Initializing database at {Path}", DatabasePath);
-        await using var conn = GetConnection();
+        try
+        {
+            await using var conn = GetConnection();
+            var version = await GetSchemaVersionAsync(conn);
+            if (version < CurrentSchemaVersion && File.Exists(DatabasePath))
+                File.Copy(DatabasePath, $"{DatabasePath}.backup-{DateTime.UtcNow:yyyyMMddHHmmss}", false);
 
-        await ExecuteAsync(conn, @"
+            await ExecuteAsync(conn, @"
             CREATE TABLE IF NOT EXISTS Projects (
                 Id TEXT PRIMARY KEY,
                 Name TEXT NOT NULL,
@@ -107,12 +115,28 @@ public sealed class DatabaseService : IDatabaseService
                 AccessCount INTEGER NOT NULL DEFAULT 1
             );
 
+            CREATE TABLE IF NOT EXISTS SchemaInfo (
+                Version INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_cues_project ON Cues(ProjectId);
             CREATE INDEX IF NOT EXISTS idx_cues_sort ON Cues(SortOrder);
             CREATE INDEX IF NOT EXISTS idx_playlists_project ON Playlists(ProjectId);
-        ");
+            ");
 
-        _logger.LogInformation("Database initialized successfully");
+            if (version < CurrentSchemaVersion)
+            {
+                await ExecuteAsync(conn, $"DELETE FROM SchemaInfo; INSERT INTO SchemaInfo(Version) VALUES({CurrentSchemaVersion});");
+            }
+
+            _logger.LogInformation("Database initialized successfully at schema {Version}", CurrentSchemaVersion);
+        }
+        catch (SqliteException ex)
+        {
+            TryBackupCorruptDatabase();
+            _logger.LogCritical(ex, "Database initialization failed; original database was preserved at {Path}", DatabasePath);
+            throw;
+        }
     }
 
     private static async Task ExecuteAsync(SqliteConnection conn, string sql)
@@ -120,5 +144,37 @@ public sealed class DatabaseService : IDatabaseService
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<int> GetSchemaVersionAsync(SqliteConnection conn)
+    {
+        await using var exists = conn.CreateCommand();
+        exists.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='SchemaInfo'";
+        if (Convert.ToInt32(await exists.ExecuteScalarAsync()) == 0) return 0;
+        await using var command = conn.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(Version), 0) FROM SchemaInfo";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static void MigrateLegacyDatabase(string destination)
+    {
+        if (File.Exists(destination)) return;
+        var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "ShowCuePlayer", "showcueplayer.db");
+        if (!File.Exists(legacy)) return;
+        File.Copy(legacy, destination, false);
+    }
+
+    private void TryBackupCorruptDatabase()
+    {
+        try
+        {
+            if (File.Exists(DatabasePath))
+                File.Copy(DatabasePath, $"{DatabasePath}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}", false);
+        }
+        catch (Exception backupError) when (backupError is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(backupError, "Could not back up failed database {Path}", DatabasePath);
+        }
     }
 }

@@ -60,8 +60,8 @@ public sealed class ImportService : IImportService
                     Artist = meta.Artist,
                     Album = meta.Album,
                     FilePath = file,
-                    Duration = MetadataService.IsImageFormat(file) && meta.DurationSeconds <= 0
-                        ? 5.0
+                    Duration = MetadataService.IsImageFormat(file)
+                        ? 0
                         : meta.DurationSeconds,
                     Metadata = meta,
                     ColorHex = targetType == PlaylistType.Video ? "#FF5252" : "#6C63FF"

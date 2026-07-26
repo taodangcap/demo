@@ -1,6 +1,8 @@
-#define MyAppName "ShowCuePlayer"
+#define MyAppName "7zyx Media"
+#ifndef MyAppVersion
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "ShowCuePlayer"
+#endif
+#define MyAppPublisher "7zyx Media"
 #define MyAppExeName "ShowCuePlayer.exe"
 #define PublishDir "..\publish\win-x64"
 
@@ -13,7 +15,7 @@ DefaultDirName={autopf64}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\installer-output
-OutputBaseFilename=ShowCuePlayer-Setup-{#MyAppVersion}-x64
+OutputBaseFilename=7zyx-Media-Setup-{#MyAppVersion}-x64
 SetupIconFile=..\Assets\logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64

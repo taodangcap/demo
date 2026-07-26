@@ -145,11 +145,3 @@ public sealed class EmptyStringToVisibilityConverter : IValueConverter
         => string.IsNullOrEmpty(value as string) ? Visibility.Collapsed : Visibility.Visible;
     public object ConvertBack(object v, Type t, object p, CultureInfo c) => throw new NotImplementedException();
 }
-
-/// <summary>Inverts bool → Visibility.</summary>
-public sealed class InverseBoolToVisibilityConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        => value is true ? Visibility.Collapsed : Visibility.Visible;
-    public object ConvertBack(object v, Type t, object p, CultureInfo c) => throw new NotImplementedException();
-}

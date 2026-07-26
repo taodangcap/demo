@@ -15,9 +15,12 @@ public sealed class InputDialog : Window
     {
         Title = title;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Width = 420; Height = 165;
+        Width = 440;
+        MinHeight = 205;
+        SizeToContent = SizeToContent.Height;
         WindowStyle = WindowStyle.ToolWindow;
         ResizeMode = ResizeMode.NoResize;
+        UseLayoutRounding = true;
         Background = (Brush)Application.Current.Resources["BgBaseBrush"];
 
         var sp = new StackPanel { Margin = new Thickness(16) };
@@ -33,9 +36,10 @@ public sealed class InputDialog : Window
         {
             Text = defaultValue,
             Style = (Style)Application.Current.Resources["SearchBoxStyle"],
-            Height = 34
+            Height = 42,
+            Padding = new Thickness(10, 0, 10, 0),
+            VerticalContentAlignment = VerticalAlignment.Center
         };
-        _textBox.SelectAll();
         _textBox.KeyDown += (_, e) =>
         {
             if (e.Key == Key.Enter) { Result = _textBox.Text; DialogResult = true; }
@@ -59,7 +63,7 @@ public sealed class InputDialog : Window
 
         var cancel = new Button
         {
-            Content = "Cancel", Width = 72, Height = 30, Margin = new Thickness(8, 0, 0, 0),
+            Content = "HỦY", Width = 72, Height = 30, Margin = new Thickness(8, 0, 0, 0),
             Style = (Style)Application.Current.Resources["FlatButtonStyle"]
         };
         cancel.Click += (_, _) => DialogResult = false;
@@ -71,6 +75,10 @@ public sealed class InputDialog : Window
         root.Children.Add(sp);
         root.Children.Add(btnRow);
         Content = root;
-        Loaded += (_, _) => _textBox.Focus();
+        Loaded += (_, _) =>
+        {
+            _textBox.Focus();
+            _textBox.SelectAll();
+        };
     }
 }

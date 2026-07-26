@@ -8,13 +8,13 @@ namespace ShowCuePlayer.Models;
 /// </summary>
 public sealed class VideoScreenInfo
 {
-    public Screen? Screen { get; }
+    public Screen Screen { get; }
     public int Index { get; }
-    public string DeviceName => Screen?.DeviceName ?? $"MockDisplay{Index}";
-    public bool IsPrimary => Screen?.Primary ?? false;
-    public int Width => Screen?.Bounds.Width ?? 1920;
-    public int Height => Screen?.Bounds.Height ?? 1080;
-    public System.Drawing.Rectangle Bounds => Screen?.Bounds ?? new System.Drawing.Rectangle(1920, 0, 1920, 1080);
+    public string DeviceName => Screen.DeviceName;
+    public bool IsPrimary => Screen.Primary;
+    public int Width => Screen.Bounds.Width;
+    public int Height => Screen.Bounds.Height;
+    public System.Drawing.Rectangle Bounds => Screen.Bounds;
 
     /// <summary>Short label for toolbar / status, e.g. "Output · Display 2".</summary>
     public string ShortName { get; }
@@ -29,26 +29,17 @@ public sealed class VideoScreenInfo
 
         string role;
         if (totalScreens <= 1)
-            role = "Only screen";
+            role = "Màn duy nhất";
         else if (screen.Primary)
-            role = "Control";
+            role = "Điều khiển";
         else
             role = "Output";
 
         ShortName = screen.Primary
-            ? $"Control · D{index}"
-            : $"Output · D{index}";
+            ? $"M{index} · CONTROL"
+            : $"M{index} · OUTPUT";
 
-        DisplayName = $"Display {index} ({role})  {Width}×{Height}";
-    }
-
-    // Mock constructor for virtual/mock display
-    public VideoScreenInfo(int index, string displayName, string shortName)
-    {
-        Screen = null;
-        Index = index;
-        DisplayName = displayName;
-        ShortName = shortName;
+        DisplayName = $"Màn {index} ({role}) · {Width}×{Height}";
     }
 
     public override string ToString() => DisplayName;

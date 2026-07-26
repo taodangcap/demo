@@ -10,6 +10,7 @@ public record HotkeyRegistration(Guid CueId, string HotkeyText, Key Key, Modifie
 /// <summary>Contract for global hotkey management.</summary>
 public interface IHotkeyService : IDisposable
 {
+    bool IsSuspended { get; set; }
     bool Register(Guid cueId, string hotkeyText, Key key, ModifierKeys modifiers);
     void Unregister(Guid cueId);
     bool HasConflict(Key key, ModifierKeys modifiers, Guid? excludeCueId = null);
@@ -26,8 +27,20 @@ public sealed class HotkeyService : IHotkeyService
 {
     private readonly ILogger<HotkeyService> _logger;
     private readonly List<HotkeyRegistration> _registrations = new List<HotkeyRegistration>();
+    private readonly HashSet<Key> _pressedKeys = new();
     private nint _hookHandle;
     private readonly NativeMethods.LowLevelKeyboardProc _proc;
+    private bool _isSuspended;
+    public bool IsSuspended
+    {
+        get => _isSuspended;
+        set
+        {
+            _isSuspended = value;
+            if (value)
+                _pressedKeys.Clear();
+        }
+    }
 
     public event EventHandler<Guid>? HotkeyPressed;
 
@@ -60,19 +73,27 @@ public sealed class HotkeyService : IHotkeyService
 
     private nint HookCallback(int nCode, nint wParam, nint lParam)
     {
-        if (nCode >= 0 && wParam == NativeMethods.WM_KEYDOWN)
+        if (nCode >= 0)
         {
             var kbStruct = Marshal.PtrToStructure<NativeMethods.KBDLLHOOKSTRUCT>(lParam);
             var key = KeyInterop.KeyFromVirtualKey((int)kbStruct.vkCode);
-            var modifiers = GetCurrentModifiers();
-
-            foreach (var reg in _registrations)
+            if (wParam == NativeMethods.WM_KEYUP || wParam == NativeMethods.WM_SYSKEYUP)
             {
-                if (reg.Key == key && reg.Modifiers == modifiers)
+                _pressedKeys.Remove(key);
+            }
+            else if (!IsSuspended
+                     && (wParam == NativeMethods.WM_KEYDOWN || wParam == NativeMethods.WM_SYSKEYDOWN)
+                     && _pressedKeys.Add(key))
+            {
+                var modifiers = GetCurrentModifiers();
+                foreach (var reg in _registrations)
                 {
-                    System.Windows.Application.Current?.Dispatcher.InvokeAsync(
-                        () => HotkeyPressed?.Invoke(this, reg.CueId));
-                    break;
+                    if (reg.Key == key && reg.Modifiers == modifiers)
+                    {
+                        System.Windows.Application.Current?.Dispatcher.InvokeAsync(
+                            () => HotkeyPressed?.Invoke(this, reg.CueId));
+                        break;
+                    }
                 }
             }
         }
@@ -103,6 +124,9 @@ public sealed class HotkeyService : IHotkeyService
     {
         public const int WH_KEYBOARD_LL = 13;
         public const int WM_KEYDOWN = 0x0100;
+        public const int WM_KEYUP = 0x0101;
+        public const int WM_SYSKEYDOWN = 0x0104;
+        public const int WM_SYSKEYUP = 0x0105;
         public const int VK_SHIFT = 0x10;
         public const int VK_CONTROL = 0x11;
         public const int VK_MENU = 0x12;

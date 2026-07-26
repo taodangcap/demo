@@ -18,6 +18,8 @@ namespace ShowCuePlayer;
 public partial class App : Application
 {
     private IHost? _host;
+    private static readonly string LogDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShowCuePlayer", "Logs");
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -36,6 +38,11 @@ public partial class App : Application
             if (args.ExceptionObject is System.Exception ex)
                 LogCrash(ex);
         };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            LogCrash(args.Exception, showDialog: false);
+            args.SetObserved();
+        };
 
         base.OnStartup(e);
 
@@ -44,6 +51,7 @@ public partial class App : Application
             {
                 logging.ClearProviders();
                 logging.AddDebug();
+                logging.AddProvider(new FileLoggerProvider(LogDirectory));
                 logging.SetMinimumLevel(LogLevel.Debug);
             })
             .ConfigureServices(RegisterServices)
@@ -55,10 +63,6 @@ public partial class App : Application
         var db = _host.Services.GetRequiredService<IDatabaseService>();
         await db.InitializeAsync();
 
-        // Initialize audio engine
-        var audio = _host.Services.GetRequiredService<IAudioEngine>();
-        audio.Initialize();
-
         // Show main window
         var mainWindow = _host.Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
@@ -69,7 +73,6 @@ public partial class App : Application
         // ── Database ──────────────────────────────────────────────
         services.AddSingleton<IDatabaseService, DatabaseService>();
         services.AddSingleton<ISettingsRepository, SettingsRepository>();
-        services.AddSingleton<ICueRepository, CueRepository>();
 
         // ── Audio Engine ──────────────────────────────────────────
         services.AddSingleton<IAudioEngine, BassAudioEngine>();
@@ -85,6 +88,7 @@ public partial class App : Application
         services.AddSingleton<IProjectService, ProjectService>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IVideoPlayerService, VideoPlayerService>();
+        services.AddSingleton<IGitHubUpdateService, GitHubUpdateService>();
 
         // ── ViewModels ────────────────────────────────────────────
         services.AddSingleton<MainViewModel>();
@@ -106,7 +110,7 @@ public partial class App : Application
                 var hotkeys = _host.Services.GetService<IHotkeyService>();
                 hotkeys?.Dispose();
             }
-            catch { /* ignore on shutdown */ }
+            catch (Exception ex) { LogCrash(ex, showDialog: false); }
 
             await _host.StopAsync(TimeSpan.FromSeconds(3));
             _host.Dispose();
@@ -116,18 +120,20 @@ public partial class App : Application
 
     private static void LogCrash(System.Exception ex, bool showDialog = true)
     {
-        string text = $"[{System.DateTime.Now}] CRASH EXCEPTION:\n{ex}\n\n";
+        var version = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown";
+        string text = $"[{DateTimeOffset.Now:O}] Version={version}; OS={Environment.OSVersion}; " +
+            $"Exception={ex.GetType().FullName}; Message={ex.Message}\n{ex}\n\n";
         try
         {
             var logDirectory = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ShowCuePlayer",
-                "Logs");
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShowCuePlayer", "Logs");
             System.IO.Directory.CreateDirectory(logDirectory);
             System.IO.File.AppendAllText(System.IO.Path.Combine(logDirectory, "crash.log"), text);
         }
-        catch { }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
         if (showDialog)
-            MessageBox.Show($"Application crashed:\n\n{ex.Message}\n\nStack trace: {ex.StackTrace}", "Show Cue Player Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show("Show Cue Player encountered an unexpected error. Details were saved in the Logs folder.",
+                "Show Cue Player Error", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

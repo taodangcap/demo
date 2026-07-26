@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net7.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>ShowCuePlayer</RootNamespace>
@@ -11,12 +11,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <Platform>x64</Platform>
+    <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Version>1.0.0</Version>
-    <Authors>ShowCuePlayer</Authors>
-    <Description>Professional Audio Cue Player for Live Productions</Description>
+    <Title>7zyx Media</Title>
+    <Product>7zyx Media</Product>
+    <Authors>7zyx Media</Authors>
+    <Description>Karaoke media control for external audio and lighting systems</Description>
     <Optimize>true</Optimize>
     <!-- Disable trimming warnings from WPF -->
     <PublishTrimmed>false</PublishTrimmed>
@@ -29,42 +33,40 @@
     <!-- Audio Engine -->
     <PackageReference Include="FontAwesome.Sharp" Version="6.6.0" />
     <PackageReference Include="ManagedBass" Version="3.1.0" />
-    <PackageReference Include="ManagedBass.Mix" Version="2.1.0" />
-    <PackageReference Include="ManagedBass.Fx" Version="2.0.1" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <PackageReference Include="NAudio" Version="2.3.0" />
 
     <!-- Metadata -->
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
 
     <!-- DI + Hosting -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="7.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="7.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.10" />
 
     <!-- MVVM -->
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
 
     <!-- Database -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="7.0.20" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
 
     <!-- JSON is built-in to .NET 7 -->
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Assets\**\*" />
+    <Resource Include="Assets\**\*" Exclude="Assets\pwa-*.png" />
+    <Compile Remove="ShowCuePlayer.Tests\**\*.cs" />
+    <None Remove="ShowCuePlayer.Tests\**\*" />
   </ItemGroup>
 
   <!-- Copy native bass dlls to output -->
   <ItemGroup>
     <None Update="bass.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="bass_fx.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="bassmix.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
   </ItemGroup>
 

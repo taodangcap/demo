@@ -26,7 +26,8 @@ public partial class VideoWindow : Window
     private double _imageDurationSeconds;
     private bool _isImageActive;
     private double _karaokeVolume = 1.0;
-    private bool _karaokeAutoNext = true;
+    private bool _karaokeMuted;
+    private bool _karaokeAutoNext;
     private bool _karaokeHooksInstalled;
     private bool _processFailureHooked;
     private LedOutputProfile _ledProfile = LedOutputProfile.CreatePresets()[0].Clone();
@@ -46,6 +47,8 @@ public partial class VideoWindow : Window
     public event EventHandler? EscapeRequested;
     public event EventHandler? ImageEnded;
     public event EventHandler<string>? KaraokeProcessFailed;
+    public event Action<string?, string?>? KaraokeStateChanged;
+    public event Action<double, double>? KaraokeProgressChanged;
 
     public VideoWindow()
     {
@@ -57,12 +60,20 @@ public partial class VideoWindow : Window
             _activeKaraokeNavigationId = e.NavigationId;
             _isKaraokeNavigating = true;
             _isKaraokePlaying = false;
+            try
+            {
+                if (KaraokeWebView.CoreWebView2 is { } core)
+                    core.IsMuted = true;
+            }
+            catch { /* WebView may still be attaching its Core instance. */ }
         };
         KaraokeWebView.NavigationCompleted += async (_, e) =>
         {
             if (_activeKaraokeNavigationId != e.NavigationId) return;
             _isKaraokeNavigating = false;
-            _isKaraokePlaying = e.IsSuccess;
+            // A successfully loaded player is only READY, not PLAYING. Keep the
+            // whole browser muted until the page explicitly reports a playing state.
+            _isKaraokePlaying = false;
             await ApplyKaraokeVolumeAsync();
             if (_isFrozen && e.IsSuccess)
             {
@@ -71,9 +82,11 @@ public partial class VideoWindow : Window
             }
         };
         Player.MediaEnded += Player_MediaEnded;
-        SizeChanged += (_, _) => ApplyProgramLayout();
+        SizeChanged += (_, _) => ScheduleProgramLayout();
+        Loaded += (_, _) => ScheduleProgramLayout();
+        ContentRendered += (_, _) => ScheduleProgramLayout();
+        StateChanged += (_, _) => ScheduleProgramLayout();
         MouseRightButtonUp += OnRightClick;
-        SourceInitialized += (_, _) => KaraokeSecondaryWindow.ApplySeparateTaskbarIdentity(this);
         Activated += (_, _) => Keyboard.Focus(this);
         PreviewMouseDown += (_, _) =>
         {
@@ -134,7 +147,23 @@ public partial class VideoWindow : Window
         _ledProfile = profile.Clone();
         _ledProfile.CanvasWidth = Math.Clamp(_ledProfile.CanvasWidth, 64, 16384);
         _ledProfile.CanvasHeight = Math.Clamp(_ledProfile.CanvasHeight, 64, 16384);
+        ScheduleProgramLayout();
+    }
+
+    /// <summary>
+    /// Recalculate after WPF has committed the output window bounds. Calling this before
+    /// the first render used to leave ProgramCanvas at 1x1 in the middle of the screen.
+    /// </summary>
+    public void RefreshProgramLayout() => ScheduleProgramLayout();
+
+    private void ScheduleProgramLayout()
+    {
         ApplyProgramLayout();
+        if (!IsLoaded) return;
+        Dispatcher.BeginInvoke(ApplyProgramLayout,
+            System.Windows.Threading.DispatcherPriority.Loaded);
+        Dispatcher.BeginInvoke(ApplyProgramLayout,
+            System.Windows.Threading.DispatcherPriority.Render);
     }
 
     public void ShowTestPattern(LedTestPattern pattern)
@@ -310,8 +339,11 @@ public partial class VideoWindow : Window
 
     private void ApplyProgramLayout()
     {
-        double availableWidth = Math.Max(1, OutputRoot.ActualWidth);
-        double availableHeight = Math.Max(1, OutputRoot.ActualHeight);
+        double availableWidth = OutputRoot.ActualWidth;
+        double availableHeight = OutputRoot.ActualHeight;
+        if (!double.IsFinite(availableWidth) || !double.IsFinite(availableHeight)
+            || availableWidth < 2 || availableHeight < 2)
+            return;
         double canvasWidth = Math.Max(1, _ledProfile.CanvasWidth);
         double canvasHeight = Math.Max(1, _ledProfile.CanvasHeight);
 
@@ -404,6 +436,7 @@ public partial class VideoWindow : Window
 
             var core = KaraokeWebView.CoreWebView2;
             if (core is null) return false;
+            core.IsMuted = true;
 
             var started = new TaskCompletionSource<ulong>(TaskCreationOptions.RunContinuationsAsynchronously);
             var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -431,7 +464,7 @@ public partial class VideoWindow : Window
                     KaraokeWebView.NavigationStarting += startingHandler;
                     KaraokeWebView.NavigationCompleted += completedHandler;
                     core.Navigate(url);
-                    var startResult = await Task.WhenAny(started.Task, Task.Delay(TimeSpan.FromSeconds(2)));
+                    var startResult = await Task.WhenAny(started.Task, Task.Delay(TimeSpan.FromSeconds(10)));
                     if (!ReferenceEquals(startResult, started.Task))
                     {
                         try { core.Stop(); } catch { /* navigation start timeout */ }
@@ -443,7 +476,7 @@ public partial class VideoWindow : Window
                     _karaokeNavigationStartGate.Release();
                 }
 
-                var result = await Task.WhenAny(completed.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+                var result = await Task.WhenAny(completed.Task, Task.Delay(TimeSpan.FromSeconds(30)));
                 if (!ReferenceEquals(result, completed.Task))
                 {
                     if (_activeKaraokeNavigationId == navigationId)
@@ -493,18 +526,168 @@ public partial class VideoWindow : Window
         {
             var core = KaraokeWebView.CoreWebView2;
             if (core is null || _karaokeHooksInstalled) return;
+            core.WebMessageReceived -= OnKaraokeWebMessageReceived;
+            core.WebMessageReceived += OnKaraokeWebMessageReceived;
             await core.AddScriptToExecuteOnDocumentCreatedAsync(
-                "try{window.__scpAutoNext=new URL(location.href).searchParams.get('autonext')!=='0';}" +
-                "catch(_){window.__scpAutoNext=true;}" +
+                "(async function(){try{" +
+                "if(sessionStorage.getItem('__scpCacheResetV3'))return;" +
+                "sessionStorage.setItem('__scpCacheResetV3','1');let changed=false;" +
+                "if('serviceWorker' in navigator){let regs=await navigator.serviceWorker.getRegistrations();" +
+                "for(let r of regs){changed=(await r.unregister())||changed;}}" +
+                "if('caches' in window){let keys=await caches.keys();for(let k of keys){changed=(await caches.delete(k))||changed;}}" +
+                "if(changed){let u=new URL(location.href);u.searchParams.set('_scp',Date.now().toString());location.replace(u.toString());}" +
+                "}catch(_){}})();" +
+                "try{window.__scpAutoNext=new URL(location.href).searchParams.get('autonext')==='1';}" +
+                "catch(_){window.__scpAutoNext=false;}" +
                 "document.addEventListener('ended',function(e){" +
                 "if(window.__scpAutoNext===false){" +
                 "e.stopImmediatePropagation();e.preventDefault();" +
-                "try{e.target.pause();}catch(_){}}},true);");
+                "try{e.target.pause();}catch(_){}}},true);" +
+                "window.__scpMedia=function(){return Array.from(document.querySelectorAll('video,audio'))" +
+                ".find(function(m){return Number.isFinite(m.duration)&&m.duration>0;});};" +
+                "window.setInterval(function(){try{var m=window.__scpMedia();" +
+                "if(m&&window.chrome&&window.chrome.webview){window.chrome.webview.postMessage(JSON.stringify({" +
+                "type:'karaoke',action:'progress',position:m.currentTime||0,duration:m.duration||0}));}}catch(_){}},500);");
             _karaokeHooksInstalled = true;
             await ApplyKaraokeAutoNextAsync();
         }
         catch (ObjectDisposedException) { }
         catch (InvalidOperationException) { }
+    }
+
+    private void OnKaraokeWebMessageReceived(
+        object? sender,
+        Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        string message;
+        try { message = e.TryGetWebMessageAsString(); }
+        catch { message = e.WebMessageAsJson ?? string.Empty; }
+        if (string.IsNullOrWhiteSpace(message)) return;
+
+        var action = ExtractKaraokeMessageField(message, "action");
+        if (!string.IsNullOrWhiteSpace(action) &&
+            !action.Equals("progress", StringComparison.OrdinalIgnoreCase))
+        {
+            ApplyKaraokePlaybackAction(action);
+        }
+
+        var position = ExtractKaraokeMessageNumber(message, "position")
+                       ?? ExtractKaraokeMessageNumber(message, "currentTime")
+                       ?? ExtractKaraokeMessageNumber(message, "time");
+        var duration = ExtractKaraokeMessageNumber(message, "duration");
+        if (_isKaraokePlaying && position is >= 0 && duration is > 0)
+            KaraokeProgressChanged?.Invoke(position.Value, duration.Value);
+
+        if (string.IsNullOrWhiteSpace(action) ||
+            action.Equals("progress", StringComparison.OrdinalIgnoreCase)) return;
+        var title = ExtractKaraokeMessageField(message, "title");
+        KaraokeStateChanged?.Invoke(action, title);
+    }
+
+    private void ApplyKaraokePlaybackAction(string action)
+    {
+        if (action.Equals("playing", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("play", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("resumed", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_isFrozen)
+            {
+                _resumeKaraokeAfterFreeze = true;
+                PauseKaraokeMedia();
+                return;
+            }
+
+            _isKaraokePlaying = true;
+            _resumeKaraokeAfterFreeze = false;
+            _ = ApplyKaraokeVolumeAsync();
+            return;
+        }
+
+        if (action.Equals("paused", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("pause", StringComparison.OrdinalIgnoreCase))
+        {
+            _resumeKaraokeAfterFreeze = false;
+            PauseKaraokeMedia();
+            return;
+        }
+
+        if (action.Equals("idle", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("ended", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("ready", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("stopped", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("stop", StringComparison.OrdinalIgnoreCase) ||
+            action.Equals("empty", StringComparison.OrdinalIgnoreCase))
+        {
+            _resumeKaraokeAfterFreeze = false;
+            PauseKaraokeMedia(resetPosition: true);
+        }
+    }
+
+    private static double? ExtractKaraokeMessageNumber(string json, string field)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var inner = root.GetString();
+                if (!string.IsNullOrWhiteSpace(inner) && inner.TrimStart().StartsWith('{'))
+                {
+                    using var innerDoc = System.Text.Json.JsonDocument.Parse(inner);
+                    if (innerDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        return ExtractNumberFromElement(innerDoc.RootElement, field);
+                }
+                return null;
+            }
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+                return ExtractNumberFromElement(root, field);
+        }
+        catch (System.Text.Json.JsonException) { }
+        return null;
+    }
+
+    private static double? ExtractNumberFromElement(System.Text.Json.JsonElement element, string field)
+    {
+        if (!element.TryGetProperty(field, out var value)) return null;
+        if (value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetDouble(out var number))
+            return number;
+        if (value.ValueKind == System.Text.Json.JsonValueKind.String &&
+            double.TryParse(value.GetString(), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out number))
+            return number;
+        return null;
+    }
+
+    private static string? ExtractKaraokeMessageField(string json, string field)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var inner = root.GetString();
+                if (!string.IsNullOrWhiteSpace(inner) && inner.TrimStart().StartsWith('{'))
+                {
+                    using var innerDoc = System.Text.Json.JsonDocument.Parse(inner);
+                    if (innerDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                        innerDoc.RootElement.TryGetProperty(field, out var innerVal) &&
+                        innerVal.ValueKind == System.Text.Json.JsonValueKind.String)
+                        return innerVal.GetString();
+                }
+                return null;
+            }
+            return root.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                   root.TryGetProperty(field, out var value) &&
+                   value.ValueKind == System.Text.Json.JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     private async Task ApplyKaraokeAutoNextAsync()
@@ -526,10 +709,16 @@ public partial class VideoWindow : Window
             if (core is null) return;
             if (message.TrimStart().StartsWith('{')) core.PostWebMessageAsJson(message);
             else core.PostWebMessageAsString(message);
-            if (message.Contains("\"action\":\"pause\"", StringComparison.OrdinalIgnoreCase))
+            if (message.Contains("\"action\":\"stop\"", StringComparison.OrdinalIgnoreCase))
             {
                 _isKaraokePlaying = false;
                 _resumeKaraokeAfterFreeze = false;
+                PauseKaraokeMedia(resetPosition: true);
+            }
+            else if (message.Contains("\"action\":\"pause\"", StringComparison.OrdinalIgnoreCase))
+            {
+                _resumeKaraokeAfterFreeze = false;
+                PauseKaraokeMedia();
             }
             else if (message.Contains("\"action\":\"play\"", StringComparison.OrdinalIgnoreCase))
             {
@@ -541,6 +730,8 @@ public partial class VideoWindow : Window
                 else
                 {
                     _isKaraokePlaying = true;
+                    _resumeKaraokeAfterFreeze = false;
+                    _ = ApplyKaraokeVolumeAsync();
                 }
             }
         }
@@ -554,6 +745,29 @@ public partial class VideoWindow : Window
         _ = ApplyKaraokeVolumeAsync();
     }
 
+    public void SetKaraokeMuted(bool muted)
+    {
+        _karaokeMuted = muted;
+        _ = ApplyKaraokeVolumeAsync();
+    }
+
+    public async Task SeekKaraokeAsync(double positionSeconds)
+    {
+        positionSeconds = Math.Max(0, positionSeconds);
+        var value = positionSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        PostMessage($"{{\"type\":\"karaoke\",\"action\":\"seek\",\"position\":{value},\"time\":{value}}}");
+        try
+        {
+            var core = KaraokeWebView.CoreWebView2;
+            if (core is null) return;
+            await core.ExecuteScriptAsync(
+                $"try{{var m=window.__scpMedia?window.__scpMedia():document.querySelector('video,audio');" +
+                $"if(m){{m.currentTime=Math.min({value},Number.isFinite(m.duration)?m.duration:{value});}}}}catch(_){{}}");
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+    }
+
     private async Task ApplyKaraokeVolumeAsync()
     {
         try
@@ -561,7 +775,13 @@ public partial class VideoWindow : Window
             var core = KaraokeWebView.CoreWebView2;
             if (core is null) return;
             var value = _karaokeVolume.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            await core.ExecuteScriptAsync($"document.querySelectorAll('video,audio').forEach(e=>{{e.muted=false;e.volume={value};}});");
+            var effectiveMuted = _karaokeMuted || !_isKaraokePlaying;
+            var muted = effectiveMuted ? "true" : "false";
+            var percent = (_karaokeVolume * 100).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            core.IsMuted = effectiveMuted;
+            PostMessage($"{{\"type\":\"karaoke\",\"action\":\"volume\",\"value\":{percent}}}");
+            PostMessage($"{{\"type\":\"karaoke\",\"action\":\"mute\",\"muted\":{muted}}}");
+            await core.ExecuteScriptAsync($"document.querySelectorAll('video,audio').forEach(e=>{{e.muted={muted};e.volume={value};}});");
         }
         catch { /* navigation in progress */ }
     }
@@ -576,7 +796,7 @@ public partial class VideoWindow : Window
         ShowIdle();
     }
 
-    public async Task<bool> PlayAsync(string filePath, double volume, bool loop, double imageDurationSeconds = 5.0)
+    public async Task<bool> PlayAsync(string filePath, double volume, bool loop)
     {
         var operationId = ++_localMediaOperationId;
         _pendingLocalMediaStart?.TrySetResult(false);
@@ -585,7 +805,7 @@ public partial class VideoWindow : Window
         {
             if (operationId != _localMediaOperationId || _isFrozen)
                 return false;
-            var started = await PlayOwnedAsync(filePath, volume, loop, imageDurationSeconds);
+            var started = await PlayOwnedAsync(filePath, volume, loop);
             if (operationId == _localMediaOperationId && !_isFrozen)
                 return started;
 
@@ -599,7 +819,7 @@ public partial class VideoWindow : Window
         }
     }
 
-    private async Task<bool> PlayOwnedAsync(string filePath, double volume, bool loop, double imageDurationSeconds)
+    private async Task<bool> PlayOwnedAsync(string filePath, double volume, bool loop)
     {
         _isLooping = loop;
 
@@ -607,7 +827,7 @@ public partial class VideoWindow : Window
         {
             try
             {
-                PlayImage(filePath, imageDurationSeconds);
+                PlayImage(filePath);
                 return !_isFrozen;
             }
             catch
@@ -708,15 +928,21 @@ public partial class VideoWindow : Window
         _isLocalMediaPlaying = false;
     }
 
-    private void PauseKaraokeMedia()
+    private void PauseKaraokeMedia(bool resetPosition = false)
     {
         _isKaraokePlaying = false;
         try
         {
             var core = KaraokeWebView.CoreWebView2;
             if (core is null) return;
+            // Core-level mute also covers cross-origin YouTube/SoundCloud iframes,
+            // which cannot be reached through document.querySelectorAll.
+            core.IsMuted = true;
+            var reset = resetPosition
+                ? "try{media.currentTime=0;}catch(_){}"
+                : string.Empty;
             _ = core.ExecuteScriptAsync(
-                "document.querySelectorAll('video,audio').forEach(media=>{media.pause();media.muted=true;});");
+                $"document.querySelectorAll('video,audio').forEach(media=>{{media.pause();media.muted=true;{reset}}});");
         }
         catch { /* WebView may be navigating while the Program source changes. */ }
     }
@@ -727,8 +953,11 @@ public partial class VideoWindow : Window
         {
             var core = KaraokeWebView.CoreWebView2;
             if (core is null) return;
+            var value = _karaokeVolume.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var muted = _karaokeMuted ? "true" : "false";
+            core.IsMuted = _karaokeMuted;
             _ = core.ExecuteScriptAsync(
-                "document.querySelectorAll('video,audio').forEach(media=>{media.muted=false;media.play().catch(()=>{});});");
+                $"document.querySelectorAll('video,audio').forEach(media=>{{media.muted={muted};media.volume={value};media.play().catch(()=>{{}});}});");
             _isKaraokePlaying = true;
         }
         catch { /* WebView may be navigating while freeze is released. */ }
@@ -773,7 +1002,9 @@ public partial class VideoWindow : Window
     }
 
     public double GetPosition() => _isImageActive
-        ? Math.Min(_imageDurationSeconds, _imageElapsedSeconds + _imageStopwatch.Elapsed.TotalSeconds)
+        ? (_imageDurationSeconds > 0
+            ? Math.Min(_imageDurationSeconds, _imageElapsedSeconds + _imageStopwatch.Elapsed.TotalSeconds)
+            : 0)
         : Player.Position.TotalSeconds;
 
     public double GetDuration() => _isImageActive
@@ -784,6 +1015,7 @@ public partial class VideoWindow : Window
     {
         if (_isImageActive)
         {
+            if (_imageDurationSeconds <= 0) return;
             _imageElapsedSeconds = Math.Clamp(positionSeconds, 0, _imageDurationSeconds);
             StartImageClock();
         }
@@ -824,7 +1056,7 @@ public partial class VideoWindow : Window
         ShowIdle();
     }
 
-    private void PlayImage(string filePath, double durationSeconds)
+    private void PlayImage(string filePath)
     {
         PauseKaraokeMedia();
         KaraokeWebView.Visibility = Visibility.Collapsed;
@@ -858,7 +1090,8 @@ public partial class VideoWindow : Window
         }
 
         _visibleImage = next;
-        _imageDurationSeconds = Math.Max(0.5, durationSeconds);
+        // Images are still sources: keep them on Program until another source or STOP replaces them.
+        _imageDurationSeconds = 0;
         _imageElapsedSeconds = 0;
         _isImageActive = true;
         StartImageClock();
@@ -873,6 +1106,11 @@ public partial class VideoWindow : Window
     {
         if (!_isImageActive) return;
         _imageTimer.Stop();
+        if (_imageDurationSeconds <= 0)
+        {
+            _imageStopwatch.Reset();
+            return;
+        }
         _imageTimer.Interval = TimeSpan.FromSeconds(Math.Max(0.01, _imageDurationSeconds - _imageElapsedSeconds));
         _imageStopwatch.Restart();
         _imageTimer.Start();
@@ -972,7 +1210,7 @@ public partial class VideoWindow : Window
             };
             item.Click += (_, _) =>
             {
-                VideoPlayerService.PlaceOnScreen(this, capture);
+                VideoPlayerService.PlaceOnScreen(this, capture, showInTaskbar: false);
             };
             fullscreenMenu.Items.Add(item);
             index++;
@@ -989,7 +1227,10 @@ public partial class VideoWindow : Window
             Height = 540;
             WindowState = WindowState.Normal;
             // Center on primary screen
-            var area = System.Windows.Forms.Screen.PrimaryScreen.WorkingArea;
+            var primaryScreen = System.Windows.Forms.Screen.PrimaryScreen
+                                ?? System.Windows.Forms.Screen.AllScreens.FirstOrDefault();
+            if (primaryScreen is null) return;
+            var area = primaryScreen.WorkingArea;
             Left = area.Left + (area.Width - Width) / 2;
             Top = area.Top + (area.Height - Height) / 2;
         };
@@ -1028,8 +1269,12 @@ public partial class VideoWindow : Window
         Player.MediaEnded -= Player_MediaEnded;
         try
         {
-            if (_processFailureHooked && KaraokeWebView.CoreWebView2 is { } core)
+            if (KaraokeWebView.CoreWebView2 is { } core)
+            {
+                core.WebMessageReceived -= OnKaraokeWebMessageReceived;
+                if (_processFailureHooked)
                 core.ProcessFailed -= OnKaraokeProcessFailed;
+            }
         }
         catch { }
         try { KaraokeWebView.Dispose(); } catch { }

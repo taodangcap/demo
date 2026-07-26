@@ -7,7 +7,7 @@
         xmlns:vm="clr-namespace:ShowCuePlayer.ViewModels"
         xmlns:fa="http://schemas.awesome.incremented/wpf/xaml/fontawesome.sharp"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
-        Title="Show Cue Player"
+        Title="7zyx Media"
         Icon="pack://application:,,,/Assets/logo.png"
         Background="{StaticResource BgBaseBrush}"
         WindowStyle="None"
@@ -22,6 +22,37 @@
         <controls:NonZeroToVisibilityConverter x:Key="NonZeroVis"/>
         <controls:EmptyStringToVisibilityConverter x:Key="EmptyStringVis"/>
         <helpers:ScreenActiveBrushConverter x:Key="ScreenActiveBrushConverter"/>
+
+        <Style x:Key="KaraokeCompactButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource AppActionButtonStyle}">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="#252A2F"/>
+            <Setter Property="Foreground" Value="#F2F4F6"/>
+        </Style>
+        <Style x:Key="KaraokePrimaryButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource KaraokeCompactButtonStyle}">
+            <Setter Property="Background" Value="#1976D2"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style x:Key="KaraokeSuccessButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource KaraokeCompactButtonStyle}">
+            <Setter Property="Background" Value="#157347"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style x:Key="KaraokeWarningButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource KaraokeCompactButtonStyle}">
+            <Setter Property="Background" Value="#765707"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style x:Key="KaraokeDangerButtonStyle" TargetType="Button"
+               BasedOn="{StaticResource KaraokeCompactButtonStyle}">
+            <Setter Property="Background" Value="#B52B35"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
     </Window.Resources>
 
     <WindowChrome.WindowChrome>
@@ -31,9 +62,9 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="44"/>   <!-- unified header -->
+            <RowDefinition Height="40"/>   <!-- unified header -->
             <RowDefinition Height="*"/>    <!-- workspace -->
-            <RowDefinition Height="28"/>   <!-- status bar -->
+            <RowDefinition Height="24"/>   <!-- status bar -->
         </Grid.RowDefinitions>
 
         <!-- ══════════════ UNIFIED HEADER (title + tools, 1 row) ══════════════ -->
@@ -48,20 +79,28 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- Brand / drag zone -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,8,0">
-                    <Image Source="pack://application:,,,/Assets/logo.png" Width="16" Height="16"
-                           Margin="0,0,8,0" RenderOptions.BitmapScalingMode="HighQuality"/>
-                    <TextBlock Text="{Binding ProjectName}"
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,14,0">
+                    <Border Width="25" Height="25" CornerRadius="6" Background="#1D313A" Margin="0,0,8,0">
+                        <Image Source="pack://application:,,,/Assets/logo.png" Width="16" Height="16"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+                    <TextBlock Text="7ZYX MEDIA"
                                Foreground="{StaticResource TextPrimaryBrush}"
-                               FontSize="13" FontWeight="SemiBold"
+                               FontSize="12" FontWeight="SemiBold"
                                VerticalAlignment="Center"
                                MaxWidth="160" TextTrimming="CharacterEllipsis"
                                ToolTip="{Binding ProjectName}"/>
+                    <Border Background="#183C2E" BorderBrush="#256347" BorderThickness="1"
+                            CornerRadius="8" Padding="7,2" Margin="8,0,0,0">
+                        <TextBlock Text="KARAOKE" Foreground="#67E8A4" FontSize="9" FontWeight="Bold"/>
+                    </Border>
                 </StackPanel>
 
                 <!-- Tools -->
                 <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"
-                              VerticalScrollBarVisibility="Disabled" Margin="0,0,4,0">
+                              VerticalScrollBarVisibility="Disabled" Margin="0,0,4,0"
+                              Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Height="44">
                         <Border Background="#151A20" BorderBrush="{StaticResource BorderStrongBrush}"
                                 BorderThickness="1" CornerRadius="5" Margin="0,6,8,6">
@@ -456,8 +495,18 @@
                     </StackPanel>
                 </ScrollViewer>
 
+                <TextBlock Grid.Column="1" Text="{Binding ProjectName, StringFormat=DỰ ÁN  ·  {0}}"
+                           Margin="12,0" IsHitTestVisible="False"
+                           Foreground="{StaticResource TextMutedBrush}" FontSize="10"
+                           VerticalAlignment="Center" HorizontalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+
                 <!-- Window chrome -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button x:Name="BtnCheckUpdates" Content="↻"
+                            Style="{StaticResource WindowChromeButtonStyle}"
+                            Click="BtnCheckUpdates_Click"
+                            ToolTip="Kiểm tra cập nhật GitHub"/>
                     <Button x:Name="BtnMinimize" Content="─" Style="{StaticResource WindowChromeButtonStyle}"
                             Click="BtnMinimize_Click"/>
                     <Button x:Name="BtnMaximize" Content="□" Style="{StaticResource WindowChromeButtonStyle}"
@@ -470,7 +519,7 @@
 
         <!-- ══════════════ CUE GRID (responsive columns) ══════════════ -->
         <Grid x:Name="ContentGrid" Grid.Row="1" SizeChanged="ContentGrid_SizeChanged"
-              Visibility="{Binding IsShowWorkspace, Converter={StaticResource BoolVis}}">
+              Visibility="Collapsed">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="ColMain" Width="*" MinWidth="280"/>
                 <ColumnDefinition x:Name="ColSplitter" Width="0"/>
@@ -744,8 +793,7 @@
                     <!-- Browser fills remaining space -->
                     <Border Grid.Row="1" Background="{StaticResource BgBaseBrush}"
                             BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
-                        <wv2:WebView2 x:Name="KaraokeControlWebView"
-                                      DefaultBackgroundColor="#222222"/>
+                            <Border Background="#151515"/>
                     </Border>
                 </Grid>
             </Border>
@@ -1219,7 +1267,7 @@
         </Grid>
 
         <Grid x:Name="MixerWorkspaceGrid" Grid.Row="1" Margin="10"
-              Visibility="{Binding IsMixerWorkspace, Converter={StaticResource BoolVis}}">
+              Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition x:Name="MixerMonitorRow" Height="320"/>
                 <RowDefinition Height="*"/>
@@ -1239,8 +1287,20 @@
                         <MediaElement x:Name="MixerPreviewVideo" LoadedBehavior="Manual" UnloadedBehavior="Manual"
                                       Stretch="Uniform" IsMuted="True" Volume="0" Visibility="Collapsed"/>
                         <Image x:Name="MixerPreviewImage" Stretch="Uniform" Visibility="Collapsed"/>
+                        <Border x:Name="MixerKaraokePreviewPlaceholder" Visibility="Collapsed"
+                                Background="#090D0A" BorderBrush="#31543B" BorderThickness="1">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <fa:IconBlock Icon="Microphone" FontSize="34" Foreground="#FFB300"
+                                              HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                                <TextBlock Text="KARAOKE WEB" Foreground="#E7E9EC" FontSize="15"
+                                           FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Chỉ hiển thị tại PROGRAM sau khi TAKE"
+                                           Foreground="#8D969F" FontSize="10" Margin="0,5,0,0"
+                                           HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
                     </Grid>
-                    <TextBlock Grid.Row="2" Text="{Binding MixerPreviewInput.Title, FallbackValue='No input'}"
+                    <TextBlock Grid.Row="2" Text="{Binding MixerPreviewTitle}"
                                Foreground="White" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                 </Grid>
             </Border>
@@ -1648,25 +1708,76 @@
                         </Border>
                     </Grid>
 
-                    <!-- INPUTS -->
+                    <!-- OBS-style SOURCES -->
                     <Grid Grid.Column="2">
-                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>
                         <DockPanel Margin="2,0,2,6">
-                            <TextBlock Text="NGUỒN (INPUTS)" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="Bold"/>
+                            <TextBlock Text="NGUỒN" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="Bold"/>
                             <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right"
-                                       Text="{Binding MixerInputs.Count, StringFormat={}{0} nguồn}"
+                                       Text="Media + Karaoke"
                                        Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
                         </DockPanel>
+                        <Grid Grid.Row="1">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Button Height="46" Margin="0,0,0,1" Padding="0" Foreground="White"
+                                    HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                                    Command="{Binding SelectMixerKaraokePreviewCommand}"
+                                    ToolTip="Karaoke Web · đưa vào Preview trước khi TAKE/CUT">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Background" Value="#151B22"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMixerKaraokePreview}" Value="True">
+                                                <Setter Property="Background" Value="#102A19"/>
+                                                <Setter Property="BorderBrush" Value="#31C86A"/>
+                                                <Setter Property="BorderThickness" Value="2"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsMixerKaraokeProgram}" Value="True">
+                                                <Setter Property="Background" Value="#351313"/>
+                                                <Setter Property="BorderBrush" Value="#EF4040"/>
+                                                <Setter Property="BorderThickness" Value="2"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="28"/><ColumnDefinition Width="48"/>
+                                        <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <fa:IconBlock Icon="Eye" FontSize="12" Foreground="#C5CBD2"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <Border Grid.Column="1" Margin="3,4" Background="#160F1C" CornerRadius="2">
+                                        <fa:IconBlock Icon="Microphone" FontSize="16" Foreground="#FFB300"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="2" Margin="8,0" VerticalAlignment="Center">
+                                        <TextBlock Text="Karaoke Web" FontSize="11" FontWeight="SemiBold" Foreground="#E7E9EC"/>
+                                        <TextBlock Text="{Binding KaraokeStatusText}" FontSize="9" Foreground="{StaticResource TextMutedBrush}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,8,0">
+                                        <Border Background="#D9186D3A" CornerRadius="3" Padding="5,1" Margin="0,0,3,0"
+                                                Visibility="{Binding IsMixerKaraokePreview, Converter={StaticResource BoolVis}}">
+                                            <TextBlock Text="PVW" FontSize="8" FontWeight="Bold" Foreground="White"/>
+                                        </Border>
+                                        <Border Background="#D9B71C1C" CornerRadius="3" Padding="5,1"
+                                                Visibility="{Binding IsMixerKaraokeProgram, Converter={StaticResource BoolVis}}">
+                                            <TextBlock Text="LIVE" FontSize="8" FontWeight="Bold" Foreground="White"/>
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
                         <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{Binding MixerInputs}">
                                 <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Vertical"/></ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Button Width="{Binding DataContext.MixerInputCardWidth, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            Height="{Binding DataContext.MixerInputCardHeight, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            Margin="0,0,7,7" Padding="0" Foreground="White"
+                                    <Button Height="44" Margin="0,0,0,1" Padding="0" Foreground="White"
                                             HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                                             Command="{Binding DataContext.SelectMixerPreviewCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             CommandParameter="{Binding}" ToolTip="{Binding Model.FilePath}">
@@ -1690,52 +1801,545 @@
                                             </Style>
                                         </Button.Style>
                                         <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="22"/>
-                                                <RowDefinition Height="*"/>
-                                                <RowDefinition Height="21"/>
-                                            </Grid.RowDefinitions>
-                                            <Border Background="{Binding ColorBrush}" Padding="6,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="28"/>
+                                                <ColumnDefinition Width="48"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <fa:IconBlock Icon="Eye" FontSize="12" Foreground="#C5CBD2"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Border Grid.Column="1" Margin="3,4" Background="#050608" CornerRadius="2" ClipToBounds="True">
                                                 <Grid>
-                                                    <TextBlock Text="{Binding DisplayNumber, StringFormat=IN {0}}" FontSize="9"
-                                                               FontWeight="Bold" VerticalAlignment="Center" Foreground="White"/>
-                                                    <TextBlock Text="{Binding Title}" Margin="35,0,2,0" FontSize="10"
-                                                               FontWeight="SemiBold" VerticalAlignment="Center"
-                                                               TextTrimming="CharacterEllipsis" Foreground="White"/>
+                                                    <fa:IconBlock Icon="PlayCircle" FontSize="14" Foreground="#4C5662"
+                                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    <Image Source="{Binding MixerThumbnail}" Stretch="UniformToFill"
+                                                           RenderOptions.BitmapScalingMode="HighQuality"/>
                                                 </Grid>
                                             </Border>
-                                            <Grid Grid.Row="1" Background="#050608" ClipToBounds="True">
-                                                <fa:IconBlock Icon="PlayCircle" FontSize="24" Foreground="#3FFFFFFF"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                                <Image Source="{Binding MixerThumbnail}"
-                                                       Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"/>
-                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
-                                                            VerticalAlignment="Top" Margin="0,4,4,0">
+                                            <StackPanel Grid.Column="2" Margin="8,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis" Foreground="#E7E9EC"/>
+                                                <TextBlock Text="{Binding StatusText}" FontSize="9"
+                                                           TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextMutedBrush}"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,8,0">
                                                     <Border Background="#D9186D3A" CornerRadius="3" Padding="5,1" Margin="0,0,3,0"
                                                             Visibility="{Binding IsMixerPreview, Converter={StaticResource BoolVis}}">
                                                         <TextBlock Text="PVW" FontSize="8" FontWeight="Bold" Foreground="White"/>
                                                     </Border>
                                                     <Border Background="#D9B71C1C" CornerRadius="3" Padding="5,1"
                                                             Visibility="{Binding IsMixerProgram, Converter={StaticResource BoolVis}}">
-                                                        <TextBlock Text="PGM" FontSize="8" FontWeight="Bold" Foreground="White"/>
+                                                        <TextBlock Text="LIVE" FontSize="8" FontWeight="Bold" Foreground="White"/>
                                                     </Border>
-                                                </StackPanel>
-                                            </Grid>
-                                            <Grid Grid.Row="2" Margin="6,0">
-                                                <TextBlock Text="{Binding Duration}" FontSize="9" VerticalAlignment="Center"
-                                                           Foreground="{StaticResource TextMutedBrush}"/>
-                                                <TextBlock Text="{Binding StatusText}" FontSize="9" HorizontalAlignment="Right"
-                                                           VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                            </Grid>
+                                            </StackPanel>
                                         </Grid>
                                     </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
+                        </Grid>
+                        <Border Grid.Row="2" Background="#12171D" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="1,0,1,1" CornerRadius="0,0,4,4">
+                            <DockPanel LastChildFill="False">
+                                <Button DockPanel.Dock="Left" Width="32" Height="32" ToolTip="Thêm nguồn"
+                                        Command="{Binding AddMediaCommand}" Background="Transparent" BorderThickness="0">
+                                    <fa:IconBlock Icon="Plus" FontSize="13" Foreground="#D7DBE0"/>
+                                </Button>
+                                <Button DockPanel.Dock="Left" Width="32" Height="32" ToolTip="Xóa nguồn đã chọn"
+                                        Command="{Binding RemoveMixerInputCommand}" CommandParameter="{Binding MixerPreviewInput}"
+                                        Background="Transparent" BorderThickness="0">
+                                    <fa:IconBlock Icon="Minus" FontSize="13" Foreground="#D7DBE0"/>
+                                </Button>
+                                <Button DockPanel.Dock="Left" Width="32" Height="32" ToolTip="Thuộc tính nguồn"
+                                        Command="{Binding OpenMixerInputSettingsCommand}" CommandParameter="{Binding MixerPreviewInput}"
+                                        Background="Transparent" BorderThickness="0">
+                                    <fa:IconBlock Icon="Gear" FontSize="12" Foreground="#D7DBE0"/>
+                                </Button>
+                                <Button DockPanel.Dock="Right" Width="32" Height="32" ToolTip="Đưa nguồn xuống"
+                                        Command="{Binding MoveMixerInputDownCommand}" CommandParameter="{Binding MixerPreviewInput}"
+                                        Background="Transparent" BorderThickness="0">
+                                    <fa:IconBlock Icon="ChevronDown" FontSize="11" Foreground="#D7DBE0"/>
+                                </Button>
+                                <Button DockPanel.Dock="Right" Width="32" Height="32" ToolTip="Đưa nguồn lên"
+                                        Command="{Binding MoveMixerInputUpCommand}" CommandParameter="{Binding MixerPreviewInput}"
+                                        Background="Transparent" BorderThickness="0">
+                                    <fa:IconBlock Icon="ChevronUp" FontSize="11" Foreground="#D7DBE0"/>
+                                </Button>
+                            </DockPanel>
+                        </Border>
                     </Grid>
                 </Grid>
             </Border>
+        </Grid>
+
+        <!-- Karaoke-only workspace. Legacy Show/Mixer controls stay hidden for data compatibility. -->
+        <Grid x:Name="KaraokeOnlyWorkspace" Grid.Row="1" Margin="12,10,12,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="#111519"
+                    BorderBrush="#303840" BorderThickness="1"
+                    CornerRadius="8" Padding="6" Margin="0,0,0,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Phiên Karaoke -->
+                    <Border Grid.Column="0" Background="#1A1F24" BorderBrush="#343C43"
+                            BorderThickness="1" CornerRadius="6" Padding="5,3">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="PHIÊN" Foreground="#77818A" FontSize="9" FontWeight="Bold"
+                                       VerticalAlignment="Center" Margin="5,0,7,0"/>
+                            <TextBox Width="82" Height="32" Margin="0,0,5,0"
+                                     Style="{StaticResource AppTextBoxStyle}"
+                                     Text="{Binding KaraokeSessionId, UpdateSourceTrigger=PropertyChanged}"
+                                     IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                     FontSize="11" FontWeight="Bold" ToolTip="Mã phiên Karaoke"/>
+                            <Button Content="MỚI" Margin="0,0,5,0"
+                                    Style="{StaticResource KaraokeCompactButtonStyle}"
+                                    IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                    Click="BtnKaraokeNewSession_Click" ToolTip="Tạo phiên Karaoke mới"/>
+                            <Button Content="SYNC" Margin="0,0,5,0"
+                                    Style="{StaticResource KaraokeCompactButtonStyle}"
+                                    IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                    Click="BtnKaraokeApply_Click" ToolTip="Đồng bộ lại phiên"/>
+                            <Button Content="{Binding KaraokeAutoNextLabel}"
+                                    Style="{StaticResource KaraokeWarningButtonStyle}"
+                                    IsEnabled="{Binding IsKaraokeConfigurationEnabled}"
+                                    Click="BtnKaraokeAutoNext_Click" ToolTip="Bật hoặc tắt tự động chuyển bài"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Dự án -->
+                    <Border Grid.Column="2" Background="#1A1F24" BorderBrush="#343C43"
+                            BorderThickness="1" CornerRadius="6" Padding="5,3">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="MỞ" Margin="0,0,4,0"
+                                    Style="{StaticResource KaraokeCompactButtonStyle}"
+                                    Command="{Binding OpenProjectCommand}" ToolTip="Mở dự án .7zyx"/>
+                            <Button Content="LƯU" Style="{StaticResource KaraokeSuccessButtonStyle}"
+                                    Command="{Binding SaveProjectCommand}" ToolTip="Lưu dự án .7zyx"/>
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="14,0"
+                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="ĐANG PHÁT" Foreground="#6F7A83" FontSize="9" FontWeight="Bold"
+                                   VerticalAlignment="Center" Margin="0,0,7,0"/>
+                        <TextBlock Text="{Binding KaraokeNowTitle}" Foreground="#DDE3E8" FontSize="10"
+                                   FontWeight="SemiBold" VerticalAlignment="Center"
+                                   MaxWidth="360" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+
+                    <!-- Transport chính -->
+                    <Border Grid.Column="4" Background="#1A1F24" BorderBrush="#343C43"
+                            BorderThickness="1" CornerRadius="6" Padding="5,3">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="▶ PLAY" Margin="0,0,4,0"
+                                    Style="{StaticResource KaraokeSuccessButtonStyle}"
+                                    IsEnabled="{Binding IsKaraokeOutputOn}" Click="BtnKaraokePlay_Click"/>
+                            <Button Content="Ⅱ PAUSE" Margin="0,0,4,0"
+                                    Style="{StaticResource KaraokeWarningButtonStyle}"
+                                    IsEnabled="{Binding IsKaraokeOutputOn}" Click="BtnKaraokePause_Click"/>
+                            <Button Content="{Binding KaraokeOnOffLabel}" MinWidth="104"
+                                    FontWeight="Bold" Click="BtnKaraokeToggleSecondary_Click">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource KaraokeSuccessButtonStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding KaraokeOnOffIsDanger}" Value="True">
+                                                <Setter Property="Background" Value="#B52B35"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" MinWidth="320"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*" MinWidth="280" MaxWidth="400"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Background="{StaticResource BgPanelBrush}"
+                        BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                        CornerRadius="7" ClipToBounds="True">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="38"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid Margin="12,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <fa:IconBlock Grid.Column="0" Icon="Microphone" FontSize="15" Foreground="#FFB300"
+                                          VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Column="1" Text="CHỌN BÀI &amp; HÀNG CHỜ" Foreground="White"
+                                       FontSize="12" FontWeight="Bold" VerticalAlignment="Center"/>
+                            <Border Grid.Column="2" Background="#192C38" BorderBrush="#284A5C"
+                                    BorderThickness="1" CornerRadius="8" Padding="7,2" VerticalAlignment="Center">
+                                <TextBlock Text="WEB OPERATOR" Foreground="#78BDE5" FontSize="9" FontWeight="SemiBold"/>
+                            </Border>
+                        </Grid>
+                        <Border Grid.Row="1" Background="#151515" BorderBrush="{StaticResource BorderSubtleBrush}"
+                                BorderThickness="0,1,0,0">
+                            <wv2:WebView2 x:Name="KaraokeOnlyControlWebView" DefaultBackgroundColor="#222222"/>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="8"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="#080A0C" BorderThickness="2"
+                            CornerRadius="8" Padding="8" VerticalAlignment="Top">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="BorderBrush" Value="#394149"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsKaraokeOutputOn}" Value="True">
+                                        <Setter Property="BorderBrush" Value="#EF4040"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="38"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Ellipse Grid.Column="0" Width="9" Height="9" Margin="3,0,8,0" VerticalAlignment="Center">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="#666"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsKaraokeOutputOn}" Value="True">
+                                                <Setter Property="Fill" Value="#00E676"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Grid.Column="1" Text="PROGRAM" Foreground="#F5F7F9" FontSize="13"
+                                       FontWeight="Bold" VerticalAlignment="Center"/>
+                            <Border Grid.Column="2" Background="#20262B" CornerRadius="8" Padding="7,2"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding SelectedVideoScreen.ShortName, StringFormat=OUTPUT · {0}}"
+                                           Foreground="#AEB7BF" FontSize="9" FontWeight="SemiBold"/>
+                            </Border>
+                        </Grid>
+
+                        <Grid x:Name="KaraokeOnlyProgramFrame" Grid.Row="1"
+                              Background="Black" ClipToBounds="True"
+                              SizeChanged="KaraokeOnlyProgramFrame_SizeChanged">
+                            <helpers:DwmThumbnailHost x:Name="KaraokeOnlyProgramDwmHost"
+                                                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                            <StackPanel x:Name="KaraokeOnlyProgramPlaceholder"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <fa:IconBlock Icon="Tv" FontSize="38" Foreground="#3D454D"
+                                              HorizontalAlignment="Center"/>
+                                <TextBlock Text="PROGRAM OFF" Foreground="#6D747B" FontSize="12"
+                                           FontWeight="Bold" Margin="0,10,0,0" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Bật Karaoke để mở màn hình phát"
+                                           Foreground="#555D64" FontSize="10" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="2" Margin="2,10,2,2">
+                            <Grid Margin="0,0,0,7">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding KaraokeNowTitle, StringFormat=ĐANG PHÁT: {0}}"
+                                           Foreground="White" FontSize="12" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                <Border Grid.Column="1" Background="#1B252C" BorderBrush="#35434C"
+                                        BorderThickness="1" CornerRadius="8" Padding="7,2" Margin="8,0,0,0">
+                                    <TextBlock Text="{Binding ProgramOutputModeText}" Foreground="#9DC5DB"
+                                               FontSize="9" FontWeight="SemiBold"/>
+                                </Border>
+                            </Grid>
+                            <Grid Margin="0,0,0,7">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="34"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="38"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="KaraokeElapsedText" Text="0:00" Foreground="#8E99A3"
+                                           FontSize="9" VerticalAlignment="Center"/>
+                                <Slider x:Name="KaraokeProgressSlider" Grid.Column="1" Minimum="0" Maximum="1"
+                                        IsEnabled="{Binding IsKaraokeOutputOn}"
+                                        Style="{StaticResource HorizontalSliderStyle}"
+                                        PreviewMouseLeftButtonDown="KaraokeProgressSlider_PreviewMouseLeftButtonDown"
+                                        PreviewMouseLeftButtonUp="KaraokeProgressSlider_LostMouseCapture"
+                                        LostMouseCapture="KaraokeProgressSlider_LostMouseCapture"/>
+                                <TextBlock x:Name="KaraokeDurationText" Grid.Column="2" Text="0:00"
+                                           Foreground="#8E99A3" FontSize="9" HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="76"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="44"/>
+                                    <ColumnDefinition Width="38"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="ÂM LƯỢNG" Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding MasterVolume, Mode=TwoWay}"
+                                        Style="{StaticResource HorizontalSliderStyle}"/>
+                                <TextBlock Grid.Column="2" Text="{Binding MasterVolume, StringFormat={}{0:P0}}"
+                                           Foreground="White" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                <Button x:Name="KaraokeMuteButton" Grid.Column="3" Width="32" Height="28"
+                                        Margin="6,0,0,0" Padding="0" Click="BtnKaraokeMute_Click"
+                                        Style="{StaticResource KaraokeCompactButtonStyle}" ToolTip="Tắt tiếng">
+                                    <TextBlock x:Name="KaraokeMuteIcon" Text="🔊" FontSize="13"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Button>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="76"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="38"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="AUDIO OUT" Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="KaraokeAudioOutputCombo" Grid.Column="1" Height="30"
+                                          Style="{StaticResource DarkComboBoxStyle}"
+                                          ItemsSource="{Binding KaraokeAudioOutputDevices, ElementName=MainRoot}"
+                                          DisplayMemberPath="Name" SelectedValuePath="Id"
+                                          MaxDropDownHeight="240"
+                                          SelectionChanged="KaraokeAudioOutputCombo_SelectionChanged"
+                                          ToolTip="Chọn mixer/thiết bị phát cho Karaoke và hiệu ứng"/>
+                                <Button Grid.Column="2" Content="↻" Width="32" Height="28" Margin="6,0,0,0"
+                                        Padding="0" Style="{StaticResource KaraokeCompactButtonStyle}"
+                                        Click="RefreshKaraokeAudioOutputs_Click" ToolTip="Quét lại thiết bị âm thanh"/>
+                            </Grid>
+                            <Grid Margin="0,11,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="0.9*"/>
+                                    <ColumnDefinition Width="1.2*"/>
+                                    <ColumnDefinition Width="1.35*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0" Content="TẮT OUTPUT" Margin="0,0,4,0"
+                                        Style="{StaticResource KaraokeDangerButtonStyle}"
+                                        IsEnabled="{Binding IsKaraokeOutputOn}"
+                                        Click="BtnProgramOutputOff_Click"
+                                        ToolTip="Tắt màn hình Output ngoài, vẫn giữ Program và phiên Karaoke"/>
+                                <Button Grid.Column="1" Content="M1 · WINDOW" Margin="0,0,4,0"
+                                        Style="{StaticResource KaraokeCompactButtonStyle}"
+                                        Click="BtnProgramScreen1Window_Click" ToolTip="Mở Program dạng cửa sổ trên Màn 1"/>
+                                <Button Grid.Column="2" Content="M2 · FULL"
+                                        Style="{StaticResource KaraokePrimaryButtonStyle}"
+                                        IsEnabled="{Binding HasSecondaryDisplay}"
+                                        ToolTipService.ShowOnDisabled="True"
+                                        Click="BtnProgramScreen2Fullscreen_Click" ToolTip="Mở Program toàn màn hình trên Màn 2 (cần màn hình phụ thật)"/>
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+                    <Border.ContextMenu>
+                        <ContextMenu Opened="ProgramContextMenu_Opened"/>
+                    </Border.ContextMenu>
+                    </Border>
+
+                    <Border Grid.Row="2" Background="{StaticResource BgPanelBrush}"
+                            BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1"
+                            CornerRadius="7" ClipToBounds="True">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="42"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <DockPanel Margin="10,0">
+                                <TextBlock Text="♫" Foreground="#FFB300" FontSize="17" FontWeight="Bold"
+                                           VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <TextBlock Text="HIỆU ỨNG ÂM THANH" Foreground="White" FontSize="11"
+                                           FontWeight="Bold" VerticalAlignment="Center"/>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Button Content="■ DỪNG" Height="28" Padding="8,0" Margin="0,0,4,0"
+                                            Style="{StaticResource KaraokeDangerButtonStyle}" FontSize="9"
+                                            Click="BtnStopAllSoundEffects_Click"/>
+                                    <Button Content="+ THÊM" Height="28" Padding="10,0"
+                                            Style="{StaticResource KaraokePrimaryButtonStyle}"
+                                            FontSize="10" FontWeight="Bold"
+                                            Click="BtnAddSoundEffects_Click"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <Grid Grid.Row="1" Background="#17191B">
+                                <TextBlock x:Name="SoundEffectsEmptyText"
+                                           Text="Chưa có hiệu ứng&#x0a;Bấm + THÊM để gắn file âm thanh"
+                                           Foreground="#70777E" FontSize="11" TextAlignment="Center"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           IsHitTestVisible="False"/>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled" Padding="5">
+                                    <ItemsControl x:Name="SoundEffectsItemsControl">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Width="112" Height="62" Margin="3"
+                                                        Tag="{Binding}" ToolTip="{Binding FilePath}"
+                                                        Click="SoundEffectButton_Click">
+                                                    <Button.Style>
+                                                        <Style TargetType="Button" BasedOn="{StaticResource KaraokeCompactButtonStyle}">
+                                                            <Setter Property="Background" Value="#292D31"/>
+                                                            <Setter Property="BorderBrush" Value="#444A50"/>
+                                                            <Setter Property="Foreground" Value="White"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                                    <Setter Property="Background" Value="#0B6845"/>
+                                                                    <Setter Property="BorderBrush" Value="#00E676"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsPaused}" Value="True">
+                                                                    <Setter Property="Background" Value="#6A4A08"/>
+                                                                    <Setter Property="BorderBrush" Value="#FFB300"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Button.Style>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Name}" FontSize="11" FontWeight="Bold"
+                                                                   TextAlignment="Center" TextWrapping="Wrap"
+                                                                   MaxHeight="32" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock FontSize="8" TextAlignment="Center" Margin="0,4,0,0">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Text" Value="BẤM ĐỂ PHÁT"/>
+                                                                    <Setter Property="Foreground" Value="#899198"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                                            <Setter Property="Text" Value="■ ĐANG PHÁT"/>
+                                                                            <Setter Property="Foreground" Value="#B9FFD9"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding IsPaused}" Value="True">
+                                                                            <Setter Property="Text" Value="Ⅱ TẠM DỪNG"/>
+                                                                            <Setter Property="Foreground" Value="#FFE0A3"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                        <TextBlock Text="{Binding HotkeyDisplay}" FontSize="8"
+                                                                   Foreground="#6FC3FF" TextAlignment="Center"
+                                                                   Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <Button.ContextMenu>
+                                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                            <MenuItem Header="Đổi tên" Click="SoundEffectRename_Click"/>
+                                                            <MenuItem Header="Đổi file âm thanh" Click="SoundEffectChangeFile_Click"/>
+                                                            <Separator/>
+                                                            <MenuItem Header="Gán / đổi hotkey…" Click="SoundEffectSetHotkey_Click"/>
+                                                            <MenuItem Header="Xóa hotkey" Click="SoundEffectClearHotkey_Click"/>
+                                                            <Separator/>
+                                                            <MenuItem Header="Xóa hiệu ứng" Foreground="#FF6262"
+                                                                      Click="SoundEffectDelete_Click"/>
+                                                        </ContextMenu>
+                                                    </Button.ContextMenu>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+
+                            <Border x:Name="SoundEffectTransportPanel" Grid.Row="2"
+                                    Background="#101214" BorderBrush="#3B4147" BorderThickness="0,1,0,0"
+                                    Padding="9" Visibility="Collapsed">
+                                <StackPanel>
+                                    <DockPanel Margin="1,0,1,4">
+                                        <TextBlock x:Name="SoundEffectTransportTitle" Foreground="White"
+                                                   FontSize="11" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock x:Name="SoundEffectTransportTime" DockPanel.Dock="Right"
+                                                   Foreground="#A8B0B7" FontSize="10" Text="0:00 / 0:00"/>
+                                    </DockPanel>
+                                    <Slider x:Name="SoundEffectSeekSlider" Minimum="0" Maximum="1" Value="0"
+                                            Style="{StaticResource HorizontalSliderStyle}"
+                                            PreviewMouseDown="SoundEffectSeekSlider_PreviewMouseDown"
+                                            PreviewMouseUp="SoundEffectSeekSlider_PreviewMouseUp"/>
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="68"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="42"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="ÂM LƯỢNG" Foreground="#A8B0B7" FontSize="9"
+                                                   FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                        <Slider x:Name="SoundEffectVolumeSlider" Grid.Column="1"
+                                                Minimum="0" Maximum="1" Value="1"
+                                                Style="{StaticResource HorizontalSliderStyle}"
+                                                ValueChanged="SoundEffectVolumeSlider_ValueChanged"/>
+                                        <TextBlock x:Name="SoundEffectVolumeText" Grid.Column="2" Text="100%"
+                                                   Foreground="White" FontSize="10" TextAlignment="Right"
+                                                   VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <Grid Margin="0,7,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="1.35*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0" Content="−10" Height="28" Margin="0,0,4,0"
+                                                Style="{StaticResource KaraokeCompactButtonStyle}" FontSize="9"
+                                                Click="BtnSoundEffectBack10_Click"/>
+                                        <Button x:Name="SoundEffectPlayPauseButton" Grid.Column="1" Content="PLAY" Height="28"
+                                                Margin="0,0,4,0" Style="{StaticResource KaraokePrimaryButtonStyle}"
+                                                FontSize="9" FontWeight="Bold"
+                                                Click="BtnSoundEffectPlayPause_Click"/>
+                                        <Button Grid.Column="2" Content="STOP" Height="28" Margin="0,0,4,0"
+                                                Style="{StaticResource KaraokeDangerButtonStyle}" FontSize="9"
+                                                Click="BtnSoundEffectStop_Click"/>
+                                        <Button Grid.Column="3" Content="+10" Height="28" Margin="0,0,4,0"
+                                                Style="{StaticResource KaraokeCompactButtonStyle}" FontSize="9"
+                                                Click="BtnSoundEffectForward10_Click"/>
+                                        <Button x:Name="SoundEffectLoopButton" Grid.Column="4" Content="LOOP: OFF" Height="28"
+                                                Style="{StaticResource KaraokeCompactButtonStyle}" FontSize="9" FontWeight="Bold"
+                                                Click="BtnSoundEffectLoop_Click"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
         </Grid>
 
         <!-- ══════════════ STATUS BAR ══════════════ -->
@@ -1746,7 +2350,8 @@
                            Foreground="{StaticResource TextPrimaryBrush}"
                            FontSize="12" VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                            Visibility="Collapsed">
                     <TextBlock Foreground="{StaticResource DangerBrush}" FontSize="12" FontWeight="SemiBold"
                                Margin="0,0,14,0"
                                Visibility="{Binding MissingMediaCount, Converter={StaticResource NonZeroVis}}"
@@ -1759,6 +2364,10 @@
                     <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
                                Text="{Binding FilteredCues.Count, StringFormat={}{0} cue}"/>
                 </StackPanel>
+                <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center"
+                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
+                           Text="{Binding KaraokeStatusText}" TextTrimming="CharacterEllipsis"
+                           MaxWidth="620"/>
             </Grid>
         </Border>
 

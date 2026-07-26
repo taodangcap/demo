@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using ShowCuePlayer.Models;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace ShowCuePlayer.Database.Repositories;
 
@@ -14,7 +15,12 @@ public interface ISettingsRepository
 public sealed class SettingsRepository : ISettingsRepository
 {
     private readonly IDatabaseService _db;
-    public SettingsRepository(IDatabaseService db) => _db = db;
+    private readonly ILogger<SettingsRepository> _logger;
+    public SettingsRepository(IDatabaseService db, ILogger<SettingsRepository> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
 
     public async Task<AppSettings> LoadAsync()
     {
@@ -23,11 +29,23 @@ public sealed class SettingsRepository : ISettingsRepository
         cmd.CommandText = "SELECT Value FROM Settings WHERE Key='AppSettings'";
         var json = (string?)await cmd.ExecuteScalarAsync();
         if (string.IsNullOrEmpty(json)) return new AppSettings();
-        return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        try
+        {
+            var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+            settings.Validate();
+            return settings;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Stored application settings are invalid; defaults will be used");
+            return new AppSettings();
+        }
     }
 
     public async Task SaveAsync(AppSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+        settings.Validate();
         await using var conn = _db.GetConnection();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"INSERT INTO Settings(Key,Value) VALUES('AppSettings',@v)

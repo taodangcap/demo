@@ -30,7 +30,7 @@ public interface IVideoPlayerService
     Screen? TargetScreen { get; }
 
     Task<bool> PrepareAsync(string filePath);
-    Task<bool> PlayAsync(Guid ownerId, string filePath, double volume = 1.0, bool loop = false, double imageDurationSeconds = 5.0);
+    Task<bool> PlayAsync(Guid ownerId, string filePath, double volume = 1.0, bool loop = false);
     void Pause();
     void Resume();
     bool Restart(Guid ownerId);
@@ -68,7 +68,10 @@ public interface IVideoPlayerService
     void EnsureOutputArmed();
 
     bool IsWindowedOutput { get; }
-    void SetWindowedOutput(bool windowed);
+    bool IsPreviewOnlyOutput { get; }
+    /// <summary>Keep the Program window alive offscreen so the control monitor can preview it.</summary>
+    void SetPreviewOnlyOutput();
+    void SetWindowedOutput(bool windowed, Screen? screen = null);
     void CaptureOutputScreenshot();
 
     event EventHandler<Guid>? MediaEnded;
@@ -78,23 +81,14 @@ public interface IVideoPlayerService
     VideoWindow? OutputWindow { get; }
 }
 
-/// <summary>
-/// Dual-monitor video output for live events.
-/// Control PC = MainWindow; Output monitor = fullscreen black/video (never flash desktop).
-public enum ProjectorSource
-{
-    Program,
-    Preview
-}
-
 public sealed class VideoPlayerService : IVideoPlayerService
 {
-    public static readonly System.Collections.Generic.List<ProjectorWindow> ActiveProjectors = new();
     private VideoWindow? _videoWindow;
     private Screen? _targetScreen;
     private double _masterVolume = 1.0;
     private double _currentVolume = 1.0;
     private bool _isOutputArmed;
+    private bool _isPreviewOnlyOutput;
     private bool _isPlaying;
     private bool _isLooping;
     private Guid? _activeOwnerId;
@@ -117,6 +111,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
 
     public bool IsOutputArmed => _isOutputArmed;
     public bool IsWindowedOutput => _isWindowedOutput;
+    public bool IsPreviewOnlyOutput => _isPreviewOnlyOutput;
     public bool IsPlaying => _isPlaying;
     public Guid? ActiveOwnerId => _activeOwnerId;
     public LedOutputProfile ActiveLedProfile => _activeLedProfile.Clone();
@@ -200,6 +195,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
 
     public void SetTargetScreen(Screen? screen, bool forceFullscreen = false)
     {
+        _isPreviewOnlyOutput = false;
         _targetScreen = screen;
         _isWindowedOutput = false;
         _forceFullscreen = forceFullscreen;
@@ -207,30 +203,42 @@ public sealed class VideoPlayerService : IVideoPlayerService
         {
             RunOnUi(() =>
             {
-                var target = _targetScreen ?? Screen.PrimaryScreen;
+                var target = _targetScreen ?? GetPrimaryScreen();
                 PlaceOnScreen(_videoWindow, target, showInTaskbar: false, forceFullscreen: _forceFullscreen);
             });
         }
     }
 
-    public void SetWindowedOutput(bool windowed)
+    public void SetWindowedOutput(bool windowed, Screen? screen = null)
     {
+        _isPreviewOnlyOutput = false;
         _isWindowedOutput = windowed;
         _forceFullscreen = false;
         if (windowed)
-        {
-            _targetScreen = null;
-        }
+            _targetScreen = screen ?? _targetScreen ?? GetPrimaryScreen();
+        else if (screen is not null)
+            _targetScreen = screen;
+
         if (_videoWindow != null && _videoWindow.IsLoaded && _isOutputArmed)
         {
             if (windowed)
-                RunOnUi(() => PlaceWindowedOnScreen(_videoWindow, Screen.PrimaryScreen));
+                RunOnUi(() => PlaceWindowedOnScreen(_videoWindow, _targetScreen ?? GetPrimaryScreen()));
             else
             {
-                var target = _targetScreen ?? Screen.PrimaryScreen;
+                var target = _targetScreen ?? GetPrimaryScreen();
                 RunOnUi(() => PlaceOnScreen(_videoWindow, target, showInTaskbar: false, forceFullscreen: _forceFullscreen));
             }
         }
+        RaiseState();
+    }
+
+    public void SetPreviewOnlyOutput()
+    {
+        _isPreviewOnlyOutput = true;
+        _isWindowedOutput = false;
+        _forceFullscreen = false;
+        if (_videoWindow is { IsLoaded: true } && _isOutputArmed)
+            RunOnUi(() => PlaceOffScreen(_videoWindow));
         RaiseState();
     }
 
@@ -443,13 +451,14 @@ public sealed class VideoPlayerService : IVideoPlayerService
         {
             if (enabled)
             {
+                _isPreviewOnlyOutput = false;
                 _isOutputArmed = true;
                 ArmOutput();
             }
             else
             {
                 var mainVm = System.Windows.Application.Current.MainWindow?.DataContext as ViewModels.MainViewModel;
-                bool keepArmedOffscreen = (ActiveProjectors.Count > 0) || (mainVm?.IsKaraokeOutputOn == true);
+                bool keepArmedOffscreen = mainVm?.IsKaraokeOutputOn == true;
                 if (keepArmedOffscreen)
                 {
                     _isOutputArmed = true;
@@ -468,7 +477,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
         });
     }
 
-    public async Task<bool> PlayAsync(Guid ownerId, string filePath, double volume = 1.0, bool loop = false, double imageDurationSeconds = 5.0)
+    public async Task<bool> PlayAsync(Guid ownerId, string filePath, double volume = 1.0, bool loop = false)
     {
         return await RunOnUiAsync(async () =>
         {
@@ -484,8 +493,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
             var playOperationId = ++_playOperationId;
             var testPatternVersion = _testPatternVersion;
             var safeSceneVersion = _safeSceneVersion;
-            var started = await _videoWindow!.PlayAsync(
-                filePath, GetEffectiveVolume(), loop, imageDurationSeconds);
+            var started = await _videoWindow!.PlayAsync(filePath, GetEffectiveVolume(), loop);
             if (!started || _isFrozen || playOperationId != _playOperationId)
             {
                 if (playOperationId == _playOperationId)
@@ -622,17 +630,17 @@ public sealed class VideoPlayerService : IVideoPlayerService
         EnsureWindowCreated();
         
         var mainVm = System.Windows.Application.Current.MainWindow?.DataContext as ViewModels.MainViewModel;
-        if (mainVm != null && !mainVm.IsVideoOutputEnabled)
+        if (_isPreviewOnlyOutput || (mainVm != null && !mainVm.IsVideoOutputEnabled))
         {
             PlaceOffScreen(_videoWindow!);
         }
         else
         {
             if (_isWindowedOutput)
-                PlaceWindowedOnScreen(_videoWindow!, Screen.PrimaryScreen);
+                PlaceWindowedOnScreen(_videoWindow!, _targetScreen ?? GetPrimaryScreen());
             else
             {
-                var target = _targetScreen ?? Screen.PrimaryScreen;
+                var target = _targetScreen ?? GetPrimaryScreen();
                 PlaceOnScreen(_videoWindow!, target, showInTaskbar: false, forceFullscreen: _forceFullscreen);
             }
         }
@@ -695,10 +703,12 @@ public sealed class VideoPlayerService : IVideoPlayerService
                 MediaEnded?.Invoke(this, owner);
         };
 
-        if (_isWindowedOutput)
-            PlaceWindowedOnScreen(_videoWindow, Screen.PrimaryScreen);
+        if (_isPreviewOnlyOutput)
+            PlaceOffScreen(_videoWindow);
+        else if (_isWindowedOutput)
+            PlaceWindowedOnScreen(_videoWindow, _targetScreen ?? GetPrimaryScreen());
         else if (_targetScreen != null)
-            PlaceOnScreen(_videoWindow, _targetScreen);
+            PlaceOnScreen(_videoWindow, _targetScreen, showInTaskbar: false, forceFullscreen: _forceFullscreen);
 
         WindowCreated?.Invoke(this, EventArgs.Empty);
     }
@@ -706,6 +716,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
     private void ResetClosedOutputState()
     {
         _isOutputArmed = false;
+        _isPreviewOnlyOutput = false;
         _isWindowedOutput = false;
         _isPlaying = false;
         _activeOwnerId = null;
@@ -724,7 +735,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
     /// Avoid WindowState.Maximized — it can jump to primary on multi-DPI setups.
     /// </summary>
     /// <param name="showInTaskbar">
-    /// Video output thường ẩn taskbar; Karaoke OUTPUT nên true để có tab riêng.
+    /// Video output thường ẩn taskbar để ứng dụng chỉ có một biểu tượng.
     /// </param>
     public static void PlaceOnScreen(Window window, Screen screen, bool showInTaskbar = true, bool forceFullscreen = false)
     {
@@ -734,13 +745,15 @@ public sealed class VideoPlayerService : IVideoPlayerService
             window.Topmost = false;
             window.WindowStyle = WindowStyle.SingleBorderWindow;
             window.ResizeMode = ResizeMode.CanResize;
-            window.ShowInTaskbar = true;
+            window.ShowInTaskbar = showInTaskbar;
             window.ShowActivated = true;
             window.WindowState = WindowState.Normal;
             window.Width = Math.Min(960, bounds.Width * 0.8);
             window.Height = Math.Min(540, bounds.Height * 0.8);
             window.Left = bounds.Left + (bounds.Width - window.Width) / 2;
             window.Top = bounds.Top + (bounds.Height - window.Height) / 2;
+            if (window is VideoWindow primaryVideoWindow)
+                primaryVideoWindow.RefreshProgramLayout();
             return;
         }
 
@@ -760,6 +773,8 @@ public sealed class VideoPlayerService : IVideoPlayerService
         // TOPMOST + full monitor bounds (tránh Maximized nhảy DPI)
         SetWindowPos(hwnd, HWND_TOPMOST, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
             SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        if (window is VideoWindow fullscreenVideoWindow)
+            fullscreenVideoWindow.RefreshProgramLayout();
         // Force redraw after move — WebView đôi khi kẹt 1 frame đen
         try { window.InvalidateVisual(); } catch { /* ignore */ }
     }
@@ -776,9 +791,11 @@ public sealed class VideoPlayerService : IVideoPlayerService
         window.WindowState = WindowState.Normal;
         window.WindowStyle = WindowStyle.SingleBorderWindow;
         window.ResizeMode = ResizeMode.CanResize;
-        window.ShowInTaskbar = true;
+        window.ShowInTaskbar = false;
         var hwnd = new WindowInteropHelper(window).EnsureHandle();
         SetWindowPos(hwnd, IntPtr.Zero, left, top, width, height, SWP_NOACTIVATE);
+        if (window is VideoWindow windowedVideoWindow)
+            windowedVideoWindow.RefreshProgramLayout();
     }
 
     public static void PlaceOffScreen(Window window)
@@ -791,12 +808,14 @@ public sealed class VideoPlayerService : IVideoPlayerService
         window.Top = -20000;
 
         // Use a standard screen size to prevent WebView2 / layout distortion
-        var targetScreen = Screen.AllScreens.Length > 1 ? Screen.AllScreens[1] : Screen.PrimaryScreen;
+        var targetScreen = Screen.AllScreens.Length > 1 ? Screen.AllScreens[1] : GetPrimaryScreen();
         var bounds = targetScreen.Bounds;
         window.Width = bounds.Width > 0 ? bounds.Width : 1920;
         window.Height = bounds.Height > 0 ? bounds.Height : 1080;
 
         window.WindowState = WindowState.Normal;
+        if (window is VideoWindow offscreenVideoWindow)
+            offscreenVideoWindow.RefreshProgramLayout();
     }
 
     private static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -806,6 +825,9 @@ public sealed class VideoPlayerService : IVideoPlayerService
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
         IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+    private static Screen GetPrimaryScreen()
+        => Screen.PrimaryScreen ?? Screen.AllScreens.First();
 
     private void RaiseState() => OutputStateChanged?.Invoke(this, EventArgs.Empty);
 

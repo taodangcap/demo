@@ -43,9 +43,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _transitionBusy;
     private CueCardViewModel? _lastPlayedCue;
     private bool _loadingLedSettings;
+    private bool _reloadingVideoScreens;
 
     public ISettingsService Settings { get; }
     public IVideoPlayerService VideoPlayer => _videoPlayer;
+    public IAudioEngine AudioEngine => _audio;
+    public IHotkeyService HotkeyService => _hotkeys;
 
     // ─── Playlists ────────────────────────────────────────────────
     public ObservableCollection<PlaylistViewModel> Playlists { get; } = new ObservableCollection<PlaylistViewModel>();
@@ -72,6 +75,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private double _karaokeBusVolume = 1.0;
     [ObservableProperty] private AudioDeviceInfo? _selectedDevice;
     [ObservableProperty] private VideoScreenInfo? _selectedVideoScreen;
+    [ObservableProperty] private bool _hasSecondaryDisplay;
     [ObservableProperty] private bool _isEditMode;
     [ObservableProperty] private bool _isLivePreviewVisible = true;
     [ObservableProperty] private bool _isVideoOutputEnabled = false;
@@ -99,7 +103,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsShowWorkspace))]
     [NotifyPropertyChangedFor(nameof(IsMixerWorkspace))]
     private WorkspaceMode _activeWorkspace = WorkspaceMode.Show;
-    [ObservableProperty] private CueCardViewModel? _mixerPreviewInput;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MixerPreviewTitle))]
+    private CueCardViewModel? _mixerPreviewInput;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MixerPreviewTitle))]
+    private bool _isMixerKaraokePreview;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MixerProgramTitle))]
+    private bool _isMixerKaraokeProgram;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MixerProgramTitle))]
     private CueCardViewModel? _mixerProgramInput;
@@ -110,6 +122,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isMixerProgramMuted;
     public bool IsShowWorkspace => ActiveWorkspace == WorkspaceMode.Show;
     public bool IsMixerWorkspace => ActiveWorkspace == WorkspaceMode.Mixer;
+    public string MixerPreviewTitle => IsMixerKaraokePreview
+        ? $"Karaoke · {(string.IsNullOrWhiteSpace(KaraokeNowTitle) ? "Ready" : KaraokeNowTitle)}"
+        : MixerPreviewInput?.Title ?? "No input";
     public string MixerProgramTitle
     {
         get
@@ -119,8 +134,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (_videoPlayer.IsBlackout) return "BLACKOUT";
             if (_videoPlayer.IsSafeScene) return "SAFE SCENE";
             if (_videoPlayer.ActiveTestPattern is LedTestPattern pattern) return $"TEST · {pattern}";
-            if (_videoPlayer.IsFrozen) return $"FREEZE · {MixerProgramInput?.Title ?? "Program"}";
+            if (_videoPlayer.IsFrozen) return $"FREEZE · {(IsMixerKaraokeProgram ? "Karaoke" : MixerProgramInput?.Title ?? "Program")}";
             if (_videoPlayer.IsStandby) return "STANDBY";
+            if (IsMixerKaraokeProgram) return $"KARAOKE · {KaraokeNowTitle}";
             return MixerProgramInput?.Title ?? "PROGRAM READY";
         }
     }
@@ -144,8 +160,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _karaokeRemoteUrl = "https://huy.sale/remote?session=";
     /// <summary>OUTPUT master player URL (registers remote session).</summary>
     [ObservableProperty] private string _karaokePlayerUrl = "https://huy.sale/player";
-    /// <summary>Live-preview pane URL (preview=1 — no remote master).</summary>
-    [ObservableProperty] private string _karaokePlayerPreviewUrl = "https://huy.sale/player?preview=1";
 
     /// <summary>Màn chiếu karaoke (secondary) đang bật.</summary>
     [ObservableProperty] private bool _isKaraokeOutputOn;
@@ -159,8 +173,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _karaokeOnOffLabel = "KARAOKE ON";
     /// <summary>Màu gợi ý: true = đang ON (nút đỏ OFF), false = OFF (nút xanh ON).</summary>
     [ObservableProperty] private bool _karaokeOnOffIsDanger;
-    [ObservableProperty] private bool _karaokeAutoNextEnabled = true;
-    [ObservableProperty] private string _karaokeAutoNextLabel = "AUTO: ON";
+    /// <summary>Vị trí và chế độ của cửa sổ Program đang dùng.</summary>
+    [ObservableProperty] private string _programOutputModeText = "ĐÃ TẮT";
+    [ObservableProperty] private bool _karaokeAutoNextEnabled;
+    [ObservableProperty] private string _karaokeAutoNextLabel = "AUTO: OFF";
     /// <summary>Test 1 màn: karaoke OUTPUT = cửa sổ windowed trên cùng màn.</summary>
     [ObservableProperty] private bool _isKaraokeSingleScreenTest = true;
     /// <summary>Nhãn nút test 1 màn.</summary>
@@ -172,6 +188,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public event EventHandler? VideoScreenChanged;
     /// <summary>Raised to toggle karaoke secondary output from VM (Space/GO on karaoke tab).</summary>
     public event EventHandler? KaraokeToggleOutputRequested;
+    public event Action<string>? MixerKaraokeTakeRequested;
+    public event Action<string>? SoundEffectHotkeyPressed;
 
     public MainViewModel(
         IServiceProvider services,
@@ -214,58 +232,112 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _videoPlayer.OutputStateChanged += OnVideoOutputStateChanged;
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
-        LoadOutputDevices();
         LoadVideoScreens();
         _ = InitializeAsync();
     }
 
     private void LoadVideoScreens()
     {
-        VideoScreens.Clear();
-        var all = System.Windows.Forms.Screen.AllScreens;
-        for (int i = 0; i < all.Length; i++)
-            VideoScreens.Add(new VideoScreenInfo(all[i], i + 1, all.Length));
+        var all = System.Windows.Forms.Screen.AllScreens
+            .OrderByDescending(screen => screen.Primary)
+            .ThenBy(screen => screen.Bounds.Left)
+            .ThenBy(screen => screen.Bounds.Top)
+            .ToArray();
 
-        // Nếu máy tính chỉ kết nối 1 màn hình vật lý, tự động thêm Màn 2 giả lập để hiển thị nút Test.
-        if (all.Length == 1)
+        _reloadingVideoScreens = true;
+        try
         {
-            VideoScreens.Add(new VideoScreenInfo(2, "Màn 2 (Cửa sổ giả lập)", "Output · D2"));
+            VideoScreens.Clear();
+            for (int i = 0; i < all.Length; i++)
+                VideoScreens.Add(new VideoScreenInfo(all[i], i + 1, all.Length));
+
+            HasSecondaryDisplay = VideoScreens.Any(screen => !screen.IsPrimary);
+
+            // Prefer saved device, else non-primary (projector), else primary.
+            VideoScreenInfo? pick = null;
+            var saved = Settings.Current.VideoOutputDeviceName;
+            if (!string.IsNullOrEmpty(saved))
+                pick = VideoScreens.FirstOrDefault(s => s.DeviceName == saved);
+
+            if (pick is null && Settings.Current.PreferSecondaryOutput)
+                pick = VideoScreens.FirstOrDefault(s => !s.IsPrimary);
+
+            SelectedVideoScreen = pick
+                ?? VideoScreens.FirstOrDefault(screen => screen.IsPrimary)
+                ?? VideoScreens.FirstOrDefault();
+        }
+        finally
+        {
+            _reloadingVideoScreens = false;
         }
 
-        // Prefer saved device, else non-primary (projector), else first
-        VideoScreenInfo? pick = null;
-        var saved = Settings.Current.VideoOutputDeviceName;
-        if (!string.IsNullOrEmpty(saved))
-            pick = VideoScreens.FirstOrDefault(s => s.DeviceName == saved);
-
-        if (pick is null && Settings.Current.PreferSecondaryOutput)
-            pick = VideoScreens.FirstOrDefault(s => !s.IsPrimary);
-
-        SelectedVideoScreen = pick ?? VideoScreens.FirstOrDefault();
+        // Initial/settings load: remember the target without opening or moving a live window.
+        if (!_videoPlayer.IsOutputArmed)
+            _videoPlayer.SetTargetScreen(SelectedVideoScreen?.Screen);
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
         Application.Current?.Dispatcher.BeginInvoke(() =>
         {
-            var previousDevice = SelectedVideoScreen?.DeviceName;
+            var previousDevice = _videoPlayer.TargetScreen?.DeviceName
+                ?? SelectedVideoScreen?.DeviceName;
+            var wasArmed = _videoPlayer.IsOutputArmed;
+            var wasPreviewOnly = _videoPlayer.IsPreviewOnlyOutput;
+            var wasWindowed = _videoPlayer.IsWindowedOutput;
             LoadVideoScreens();
 
-            var previousStillAvailable = !string.IsNullOrWhiteSpace(previousDevice)
-                && VideoScreens.Any(screen => screen.DeviceName == previousDevice);
-            if (!previousStillAvailable)
+            if (!wasArmed)
+                return;
+
+            if (wasPreviewOnly)
             {
-                StatusMessage = VideoScreens.Count > 1
-                    ? $"⚠ Màn Output đã thay đổi · chuyển sang {SelectedVideoScreen?.ShortName}"
-                    : "⚠ Mất Màn 2 · Output chuyển về Màn 1 dạng windowed";
+                _videoPlayer.SetPreviewOnlyOutput();
+                return;
             }
+
+            var restored = VideoScreens.FirstOrDefault(screen =>
+                string.Equals(screen.DeviceName, previousDevice, StringComparison.OrdinalIgnoreCase));
+            if (restored is not null)
+            {
+                SelectedVideoScreen = restored;
+                if (wasWindowed)
+                    _videoPlayer.SetWindowedOutput(true, restored.Screen);
+                else
+                    _videoPlayer.SetTargetScreen(restored.Screen, forceFullscreen: true);
+                return;
+            }
+
+            // Never fall back to fullscreen on the operator monitor when a projector is unplugged.
+            var primary = VideoScreens.FirstOrDefault(screen => screen.IsPrimary)
+                ?? VideoScreens.FirstOrDefault();
+            if (primary is null)
+                return;
+
+            _videoPlayer.SetWindowedOutput(true, primary.Screen);
+            SelectedVideoScreen = primary;
+            ProgramOutputModeText = $"{primary.ShortName} · WINDOW";
+            StatusMessage = "⚠ Mất màn đang chiếu · PROGRAM đã thu về Màn 1 dạng cửa sổ";
         });
     }
 
     partial void OnSelectedVideoScreenChanged(VideoScreenInfo? value)
     {
-        bool forceFullscreen = value != null && value.Screen == null;
-        _videoPlayer.SetTargetScreen(value?.Screen, forceFullscreen);
+        if (!_reloadingVideoScreens && value is not null)
+        {
+            if (_videoPlayer.IsPreviewOnlyOutput)
+            {
+                // PROGRAM nội bộ stays hidden; only remember the screen for the next external output.
+            }
+            else if (_videoPlayer.IsWindowedOutput)
+            {
+                _videoPlayer.SetWindowedOutput(true, value.Screen);
+            }
+            else
+            {
+                _videoPlayer.SetTargetScreen(value.Screen, forceFullscreen: _videoPlayer.IsOutputArmed);
+            }
+        }
         if (value is not null)
         {
             Settings.Current.VideoOutputDeviceName = value.DeviceName;
@@ -360,6 +432,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         // Karaoke session đã lưu
         KaraokeSessionId = Settings.Current.KaraokeSessionId ?? string.Empty;
+        if (!Settings.Current.KaraokeSafeTakeDefaultsApplied)
+        {
+            Settings.Current.KaraokeAutoNextEnabled = false;
+            Settings.Current.KaraokeSafeTakeDefaultsApplied = true;
+            await Settings.SaveAsync();
+        }
         KaraokeAutoNextEnabled = Settings.Current.KaraokeAutoNextEnabled;
         RebuildKaraokeUrls();
 
@@ -368,7 +446,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RefreshKaraokeSingleScreenTestLabel();
         RefreshKaraokeStatusUi();
 
-        // Default tabs: Main Music + Karaoke Web (có X để đóng)
+        // Karaoke-only shell: keep legacy playlists in storage, but always operate from Karaoke.
         EnsureDefaultPlaylists();
         ValidateAllMedia();
 
@@ -555,14 +633,73 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void SelectMixerPreview(CueCardViewModel? input)
     {
         if (input is null || !MixerInputs.Contains(input)) return;
+        IsMixerKaraokePreview = false;
         MixerPreviewInput = input;
         StatusMessage = $"MIXER PREVIEW · {input.Title}";
+    }
+
+    [RelayCommand]
+    private void SelectMixerKaraokePreview()
+    {
+        EnsureKaraokeTab(select: false);
+        EnsureKaraokeSessionId();
+        RebuildKaraokeUrls();
+        MixerPreviewInput = null;
+        IsMixerKaraokePreview = true;
+        OnPropertyChanged(nameof(MixerPreviewTitle));
+        StatusMessage = $"MIXER PREVIEW · Karaoke · session {KaraokeSessionId}";
+    }
+
+    [RelayCommand]
+    private void RemoveMixerInput(CueCardViewModel? input)
+    {
+        if (input is null || !MixerInputs.Contains(input)) return;
+        RemoveCue(input);
+    }
+
+    [RelayCommand]
+    private void MoveMixerInputUp(CueCardViewModel? input) => MoveMixerInput(input, -1);
+
+    [RelayCommand]
+    private void MoveMixerInputDown(CueCardViewModel? input) => MoveMixerInput(input, 1);
+
+    private void MoveMixerInput(CueCardViewModel? input, int offset)
+    {
+        if (GuardIfLocked("sắp xếp nguồn") || input is null || SelectedPlaylist is null) return;
+        var oldIndex = SelectedPlaylist.Cues.IndexOf(input);
+        var newIndex = oldIndex + offset;
+        if (oldIndex < 0 || newIndex < 0 || newIndex >= SelectedPlaylist.Cues.Count) return;
+
+        SelectedPlaylist.Cues.Move(oldIndex, newIndex);
+        for (var i = 0; i < SelectedPlaylist.Cues.Count; i++)
+            SelectedPlaylist.Cues[i].Model.SortOrder = i;
+        RefreshFilter();
+        MixerPreviewInput = input;
+        StatusMessage = $"Đã sắp xếp nguồn: {input.Title}";
+    }
+
+    [RelayCommand]
+    private void OpenMixerInputSettings(CueCardViewModel? input)
+    {
+        if (GuardIfLocked("mở thuộc tính nguồn") || input is null) return;
+        var window = new Views.CueSettingsWindow
+        {
+            DataContext = new CueSettingsViewModel(input),
+            Owner = Application.Current.MainWindow
+        };
+        window.ShowDialog();
     }
 
     partial void OnMixerPreviewInputChanged(CueCardViewModel? oldValue, CueCardViewModel? newValue)
     {
         oldValue?.SetMixerPreviewState(false);
         newValue?.SetMixerPreviewState(true);
+    }
+
+    partial void OnKaraokeNowTitleChanged(string value)
+    {
+        OnPropertyChanged(nameof(MixerPreviewTitle));
+        OnPropertyChanged(nameof(MixerProgramTitle));
     }
 
     partial void OnMixerProgramInputChanged(CueCardViewModel? oldValue, CueCardViewModel? newValue)
@@ -589,6 +726,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_videoPlayer.IsFrozen)
         {
             StatusMessage = $"MIXER {transition} blocked · OUTPUT FROZEN";
+            return;
+        }
+        if (IsMixerKaraokePreview)
+        {
+            MixerKaraokeTakeRequested?.Invoke(transition);
+            StatusMessage = $"MIXER {transition} → Karaoke";
             return;
         }
         var target = MixerPreviewInput;
@@ -633,6 +776,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_videoPlayer.IsFrozen)
         {
             StatusMessage = "MIXER FADE blocked · OUTPUT FROZEN";
+            return;
+        }
+        if (IsMixerKaraokePreview)
+        {
+            MixerKaraokeTakeRequested?.Invoke("FADE");
+            StatusMessage = "MIXER FADE → Karaoke";
             return;
         }
         var target = MixerPreviewInput;
@@ -1030,8 +1179,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             other.MarkReplacedOnMixerProgram();
 
         MixerProgramInput = target;
+        IsMixerKaraokeProgram = false;
+        if (IsKaraokeOutputOn)
+            SetKaraokeOutputOn(false);
         StatusMessage = $"MIXER {transition} → {target.Title}";
         return true;
+    }
+
+    public void SetMixerKaraokeProgramActive(bool active)
+    {
+        IsMixerKaraokeProgram = active;
+        if (active)
+        {
+            foreach (var cue in Playlists.SelectMany(playlist => playlist.Cues)
+                         .Where(cue => cue.IsPlaying || cue.IsPaused).ToArray())
+                cue.MarkReplacedOnMixerProgram();
+            MixerProgramInput = null;
+            IsOutputPlaying = true;
+        }
+        OnPropertyChanged(nameof(MixerProgramTitle));
     }
 
     private bool IsMixerTakeCurrent(long takeVersion)
@@ -1187,9 +1353,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         KaraokeRemoteUrl = AppendOrReplaceQuery(KaraokeRemoteUrl, "ui", "pc");
         KaraokeRemoteUrl = AppendOrReplaceQuery(KaraokeRemoteUrl, "autonext", KaraokeAutoNextEnabled ? "1" : "0");
 
-        // Player URL: cùng session (2 WebView localStorage tách biệt)
-        // OUTPUT master: embed/host/master — registers remote
-        // Preview pane: +preview=1 — mirror only, no dual-master
+        // Chỉ tạo một player master cho PROGRAM; Mixer PREVIEW không chạy WebView.
         var player = StripQueryParams(playerBase, "session", "token", "embed", "host", "master", "preview");
         if (!string.IsNullOrEmpty(session))
         {
@@ -1198,9 +1362,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             player = AppendOrReplaceQuery(player, "host", "showcue");
         }
         KaraokePlayerUrl = AppendOrReplaceQuery(player, "master", "1");
-        KaraokePlayerPreviewUrl = AppendOrReplaceQuery(player, "preview", "1");
         KaraokePlayerUrl = AppendOrReplaceQuery(KaraokePlayerUrl, "autonext", KaraokeAutoNextEnabled ? "1" : "0");
-        KaraokePlayerPreviewUrl = AppendOrReplaceQuery(KaraokePlayerPreviewUrl, "autonext", KaraokeAutoNextEnabled ? "1" : "0");
     }
 
     /// <summary>
@@ -1224,6 +1386,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         IsKaraokeOutputOn = on;
         if (!on)
+            IsMixerKaraokeProgram = false;
+        if (!on)
         {
             KaraokeMasterReady = false;
             KaraokeNowTitle = "—";
@@ -1232,7 +1396,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         StatusMessage = on
             ? $"Karaoke ON · session {KaraokeSessionId}"
             : "Karaoke OFF";
-        _videoPlayer.SetOutputEnabled(IsVideoOutputEnabled);
+        if (on)
+            _videoPlayer.EnsureOutputArmed();
+        else
+            _videoPlayer.SetOutputEnabled(IsVideoOutputEnabled);
     }
 
     /// <summary>Bridge từ player: ready / playing / idle / paused.</summary>
@@ -1247,13 +1414,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (string.IsNullOrWhiteSpace(KaraokeNowTitle) || KaraokeNowTitle == "—")
                 KaraokeNowTitle = "Sẵn sàng";
         }
-        else if (a.Equals("playing", StringComparison.OrdinalIgnoreCase))
+        else if (a.Equals("playing", StringComparison.OrdinalIgnoreCase) ||
+                 a.Equals("play", StringComparison.OrdinalIgnoreCase) ||
+                 a.Equals("resumed", StringComparison.OrdinalIgnoreCase))
         {
             KaraokeMasterReady = true;
             if (!string.IsNullOrWhiteSpace(title))
                 KaraokeNowTitle = title.Trim();
         }
-        else if (a.Equals("paused", StringComparison.OrdinalIgnoreCase))
+        else if (a.Equals("paused", StringComparison.OrdinalIgnoreCase) ||
+                 a.Equals("pause", StringComparison.OrdinalIgnoreCase))
         {
             if (!string.IsNullOrWhiteSpace(title))
                 KaraokeNowTitle = title.Trim();
@@ -1261,7 +1431,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 KaraokeNowTitle = $"⏸ {KaraokeNowTitle}";
         }
         else if (a.Equals("idle", StringComparison.OrdinalIgnoreCase) ||
-                 a.Equals("ended", StringComparison.OrdinalIgnoreCase))
+                 a.Equals("ended", StringComparison.OrdinalIgnoreCase) ||
+                 a.Equals("stopped", StringComparison.OrdinalIgnoreCase) ||
+                 a.Equals("stop", StringComparison.OrdinalIgnoreCase) ||
+                 a.Equals("empty", StringComparison.OrdinalIgnoreCase))
         {
             KaraokeNowTitle = "Idle";
         }
@@ -1463,22 +1636,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Fresh session: always have a working audio tab + Karaoke Web tab (user can X to close).
+    /// Karaoke-only startup. Legacy media playlists remain loadable for data compatibility.
     /// </summary>
     private void EnsureDefaultPlaylists()
     {
-        if (Playlists.Count == 0)
-        {
-            var main = new PlaylistViewModel(new PlaylistModel
-            {
-                Name = "Main Music",
-                Type = PlaylistType.Audio
-            });
-            Playlists.Add(main);
-            SelectedPlaylist = main;
-        }
-
-        EnsureKaraokeTab(select: false);
+        var karaoke = EnsureKaraokeTab(select: false);
+        SelectedPlaylist = karaoke;
+        ActiveWorkspace = WorkspaceMode.Show;
     }
 
     /// <summary>Create Karaoke Web playlist tab if missing.</summary>
@@ -1656,7 +1820,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             sb.AppendLine();
             sb.AppendLine(new string('=', 48));
-            sb.AppendLine("ShowCuePlayer — setlist export");
+            sb.AppendLine("7zyx Media — setlist export");
         }
 
         await File.WriteAllTextAsync(dlg.FileName, sb.ToString(), Encoding.UTF8);
@@ -1902,7 +2066,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (dlg.ShowDialog() != true) return;
         var proj = await _project.OpenAsync(dlg.FileName);
         if (proj is null) return;
-        LoadProjectIntoGrid(proj);
+        await LoadProjectIntoGridAsync(proj);
         ProjectName = proj.Name;
         RememberRecentProject(dlg.FileName);
         StatusMessage = $"Đã mở: {proj.Name}";
@@ -2276,7 +2440,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void StartWindowedOutput()
     {
         if (GuardIfLocked("mo cua so moi")) return;
-        _videoPlayer.SetWindowedOutput(true);
+        var primary = VideoScreens.FirstOrDefault(screen => screen.IsPrimary)
+            ?? VideoScreens.FirstOrDefault();
+        _videoPlayer.SetWindowedOutput(true, primary?.Screen);
+        if (primary is not null)
+            SelectedVideoScreen = primary;
         if (!_videoPlayer.IsOutputArmed)
         {
             IsVideoOutputEnabled = true;
@@ -2615,7 +2783,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyBusVolumes()
     {
-        _audio.SetMasterVolume(Math.Clamp(MasterVolume * AudioBusVolume, 0, 1));
+        // Karaoke-only: audio is owned by the Program WebView, not the legacy BASS engine.
         _videoPlayer.SetMasterVolume(Math.Clamp(MasterVolume * VideoBusVolume, 0, 1));
     }
 
@@ -2847,7 +3015,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void OnHotkeyPressed(object? sender, Guid cueId)
     {
         var vm = Playlists.SelectMany(p => p.Cues).FirstOrDefault(c => c.Model.Id == cueId);
-        vm?.PlayCommand.ExecuteAsync(null);
+        if (vm is not null)
+        {
+            vm.PlayCommand.ExecuteAsync(null);
+            return;
+        }
+
+        var effect = Settings.Current.KaraokeSoundEffects.FirstOrDefault(item =>
+            Guid.TryParse(item.Id, out var effectId) && effectId == cueId);
+        if (effect is not null)
+            SoundEffectHotkeyPressed?.Invoke(effect.Id);
     }
 
     // ─── Project Sync ─────────────────────────────────────────────
@@ -2857,9 +3034,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _project.Current.Cues = Playlists.SelectMany(p => p.Cues.Select(c => c.Model)).ToList();
         _project.Current.Playlists = Playlists.Select(p => p.Model).ToList();
         _project.Current.Name = ProjectName;
+        _project.Current.KaraokeSoundEffects = CloneKaraokeSoundEffects(
+            Settings.Current.KaraokeSoundEffects);
     }
 
-    private void LoadProjectIntoGrid(ProjectModel proj)
+    private async Task LoadProjectIntoGridAsync(ProjectModel proj)
     {
         ProtectProgramBeforeRemoving(Playlists.SelectMany(playlist => playlist.Cues));
         SelectedCue = null;
@@ -2901,7 +3080,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         SelectedPlaylist = Playlists.FirstOrDefault(p => p.Model.Id.ToString() == proj.ActivePlaylistId) 
                            ?? Playlists.FirstOrDefault();
+
+        // Project cũ không có trường này (null) thì giữ Soundboard hiện tại.
+        // Project mới có danh sách, kể cả rỗng, thì khôi phục đúng trạng thái đã lưu.
+        if (proj.KaraokeSoundEffects is not null)
+        {
+            Settings.Current.KaraokeSoundEffects = CloneKaraokeSoundEffects(proj.KaraokeSoundEffects);
+            await Settings.SaveAsync();
+        }
     }
+
+    private static List<KaraokeSoundEffect> CloneKaraokeSoundEffects(
+        IEnumerable<KaraokeSoundEffect> effects)
+        => effects.Select(effect => new KaraokeSoundEffect
+        {
+            Id = effect.Id,
+            Name = effect.Name,
+            FilePath = effect.FilePath,
+            Loop = effect.Loop,
+            Volume = effect.Volume,
+            HotkeyText = effect.HotkeyText
+        }).ToList();
 
     private async Task AutoSaveAsync()
     {

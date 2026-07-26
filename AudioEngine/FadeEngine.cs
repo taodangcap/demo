@@ -18,7 +18,7 @@ public interface IFadeEngine
 public sealed class FadeEngine : IFadeEngine
 {
     private readonly ILogger<FadeEngine> _logger;
-    private readonly Dictionary<int, CancellationTokenSource> _fades = new Dictionary<int, CancellationTokenSource>();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, CancellationTokenSource> _fades = new();
 
     public FadeEngine(ILogger<FadeEngine> logger) => _logger = logger;
 
@@ -52,15 +52,19 @@ public sealed class FadeEngine : IFadeEngine
         }
         catch (OperationCanceledException) { /* intentional */ }
         catch (Exception ex) { _logger.LogError(ex, "Fade error on handle {H}", handle); }
-        finally { _fades.Remove(handle); }
+        finally
+        {
+            if (_fades.TryRemove(new KeyValuePair<int, CancellationTokenSource>(handle, cts)))
+                cts.Dispose();
+        }
     }
 
     public void CancelFade(int handle)
     {
-        if (_fades.TryGetValue(handle, out var cts))
+        if (_fades.TryRemove(handle, out var cts))
         {
             cts.Cancel();
-            _fades.Remove(handle);
+            cts.Dispose();
         }
     }
 }

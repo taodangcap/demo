@@ -24,9 +24,7 @@ public static class WebView2Performance
         "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling " +
         "--enable-gpu-rasterization " +
         "--enable-zero-copy " +
-        "--ignore-gpu-blocklist " +
-        "--disable-gpu-driver-bug-workarounds " +
-        "--enable-features=VaapiVideoDecoder,CanvasOopRasterization,PlatformHEVCDecoderSupport";
+        "--enable-features=CanvasOopRasterization,PlatformHEVCDecoderSupport";
 
     public static async Task<CoreWebView2Environment> GetOutputEnvironmentAsync()
     {
@@ -65,7 +63,7 @@ public static class WebView2Performance
             s.IsStatusBarEnabled = false;
             s.AreDefaultContextMenusEnabled = false;
             s.IsZoomControlEnabled = false;
-            s.IsBuiltInErrorPageEnabled = false;
+            s.IsBuiltInErrorPageEnabled = true;
             s.IsScriptEnabled = true;
             s.IsWebMessageEnabled = true;
             try { s.IsGeneralAutofillEnabled = false; } catch { /* runtime */ }

@@ -13,9 +13,10 @@ public sealed class HotkeyDialog : Window
     public string Result { get; private set; } = string.Empty;
     private readonly TextBlock _display;
 
-    public HotkeyDialog(string currentHotkey)
+    public HotkeyDialog(string currentHotkey, string? targetName = null)
     {
-        Title = "Assign Hotkey";
+        Result = currentHotkey ?? string.Empty;
+        Title = "Gán hotkey";
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Width = 380; Height = 210;
         WindowStyle = WindowStyle.ToolWindow;
@@ -26,7 +27,9 @@ public sealed class HotkeyDialog : Window
 
         sp.Children.Add(new TextBlock
         {
-            Text = "Press the key combination you want to assign:",
+            Text = string.IsNullOrWhiteSpace(targetName)
+                ? "Bấm tổ hợp phím bạn muốn gán:"
+                : $"Bấm tổ hợp phím cho “{targetName}”: \nHotkey hoạt động cả khi app đang thu nhỏ.",
             Foreground = (Brush)Application.Current.Resources["TextSecondaryBrush"],
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 16)
@@ -34,7 +37,7 @@ public sealed class HotkeyDialog : Window
 
         _display = new TextBlock
         {
-            Text = string.IsNullOrEmpty(currentHotkey) ? "Press a key..." : currentHotkey,
+            Text = string.IsNullOrEmpty(currentHotkey) ? "BẤM PHÍM..." : currentHotkey,
             FontSize = 22, FontWeight = FontWeights.Bold,
             Foreground = (Brush)Application.Current.Resources["AccentPrimaryBrush"],
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -50,7 +53,7 @@ public sealed class HotkeyDialog : Window
 
         var clear = new Button
         {
-            Content = "Clear", Height = 30, Padding = new Thickness(12, 0, 12, 0),
+            Content = "XÓA PHÍM", Height = 30, Padding = new Thickness(12, 0, 12, 0),
             Style = (Style)Application.Current.Resources["FlatButtonStyle"],
             Margin = new Thickness(0, 0, 8, 0)
         };
@@ -58,14 +61,14 @@ public sealed class HotkeyDialog : Window
 
         var assign = new Button
         {
-            Content = "Assign", Height = 30, Padding = new Thickness(16, 0, 16, 0),
+            Content = "GÁN", Height = 30, Padding = new Thickness(16, 0, 16, 0),
             Style = (Style)Application.Current.Resources["AccentButtonStyle"]
         };
         assign.Click += (_, _) => { if (!string.IsNullOrEmpty(Result)) DialogResult = true; };
 
         var cancel = new Button
         {
-            Content = "Cancel", Height = 30, Padding = new Thickness(12, 0, 12, 0),
+            Content = "HỦY", Height = 30, Padding = new Thickness(12, 0, 12, 0),
             Style = (Style)Application.Current.Resources["FlatButtonStyle"],
             Margin = new Thickness(8, 0, 0, 0)
         };
@@ -90,14 +93,8 @@ public sealed class HotkeyDialog : Window
             or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)
             return;
 
-        var mods = Keyboard.Modifiers;
-        var parts = new System.Collections.Generic.List<string>();
-        if (mods.HasFlag(ModifierKeys.Control)) parts.Add("Ctrl");
-        if (mods.HasFlag(ModifierKeys.Shift)) parts.Add("Shift");
-        if (mods.HasFlag(ModifierKeys.Alt)) parts.Add("Alt");
-        if (mods.HasFlag(ModifierKeys.Windows)) parts.Add("Win");
-        parts.Add(key.ToString());
-        Result = string.Join("+", parts);
+        Result = Helpers.HotkeyUtil.Format(key, Keyboard.Modifiers);
+        if (string.IsNullOrWhiteSpace(Result)) return;
         _display.Text = Result;
     }
 }

@@ -113,6 +113,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     private PlaybackMode _playbackMode;
 
     public bool IsVideo => MetadataService.IsVideoFormat(Model.FilePath);
+    public bool IsImage => MetadataService.IsImageFormat(Model.FilePath);
     public bool IsMixerLoopEnabled => IsLooping || PlaybackMode == PlaybackMode.Loop;
 
     public CueCardViewModel(
@@ -148,12 +149,11 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
             HotkeyText = string.Empty;
         }
         Model = model;
-        if (MetadataService.IsImageFormat(model.FilePath) && model.Duration <= 0)
-            model.Duration = 5.0;
+        if (IsImage)
+            model.Duration = 0;
         Title = model.Title;
         Artist = model.Artist;
-        Duration = FormatEffectiveDuration(model.Duration);
-        Remaining = $"-{Duration}";
+        ResetTimelineDisplay();
         Volume = model.Volume;
         VolumePercent = Math.Round(model.Volume * 100);
         IsLooping = model.IsLooping;
@@ -177,6 +177,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DisplayNumber));
         OnPropertyChanged(nameof(HasNotes));
         OnPropertyChanged(nameof(IsVideo));
+        OnPropertyChanged(nameof(IsImage));
         ResetMixerThumbnail();
     }
 
@@ -233,7 +234,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
         Model.CueOutPoint = tempModel.CueOutPoint;
         CrossfadeSeconds = tempModel.CrossfadeSeconds;
         Model.CrossfadeSeconds = tempModel.CrossfadeSeconds;
-        Duration = FormatEffectiveDuration(Model.Duration);
+        Duration = IsImage ? "STILL" : FormatEffectiveDuration(Model.Duration);
 
         Pan = tempModel.Pan;
         Model.Pan = tempModel.Pan;
@@ -278,10 +279,12 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
 
             Title = meta.Title;
             Artist = meta.Artist;
-            Duration = TimeFormatter.Format(meta.DurationSeconds);
-            Remaining = $"-{Duration}";
+            if (MetadataService.IsImageFormat(filePath))
+                Model.Duration = 0;
+            ResetTimelineDisplay();
             RefreshMediaStatus();
             OnPropertyChanged(nameof(IsVideo));
+            OnPropertyChanged(nameof(IsImage));
             UpdateStatus(CueStatus.Ready);
         }
         catch (Exception)
@@ -292,10 +295,10 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
             
             Title = Model.Title;
             Artist = string.Empty;
-            Duration = "0:00";
-            Remaining = "-0:00";
+            ResetTimelineDisplay();
             RefreshMediaStatus();
             OnPropertyChanged(nameof(IsVideo));
+            OnPropertyChanged(nameof(IsImage));
             UpdateStatus(CueStatus.Error);
             StatusText = "LOAD FAILED";
         }
@@ -446,33 +449,39 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
         {
             if (!_videoPlayer.Restart(Model.Id))
                 return false;
-            HookVideoEnd();
+            if (IsImage)
+                UnhookVideoEnd();
+            else
+                HookVideoEnd();
         }
         else
         {
             _audio.Seek(_handle, GetRegionStart());
         }
 
-        _suppressNaturalEnd = false;
+        _suppressNaturalEnd = IsImage;
         _crossfadeWindowFired = false;
         _cueOutHandled = false;
 
         double mediaStart = GetRegionStart();
-        if (IsVideo && mediaStart > 0.01)
+        if (IsVideo && !IsImage && mediaStart > 0.01)
             _videoPlayer.Seek(mediaStart);
 
-        Position = 0;
-        Elapsed = "0:00";
-        Remaining = $"-{Duration}";
+        ResetTimelineDisplay();
         Model.LastPlayed = DateTime.UtcNow;
         Model.PlayCount++;
         UpdateStatus(CueStatus.Playing);
-        _timer.Start();
+        if (!IsImage)
+            _timer.Start();
         NotifyStarted();
         return true;
     }
 
-    public void BeginMixerProgramSeek() => _isSeeking = true;
+    public void BeginMixerProgramSeek()
+    {
+        if (!IsImage)
+            _isSeeking = true;
+    }
 
     public void CancelMixerProgramSeek() => _isSeeking = false;
 
@@ -480,6 +489,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     {
         _isSeeking = false;
         if (_disposed) return false;
+        if (IsImage) return false;
         if (IsVideo && _videoPlayer.ActiveOwnerId != Model.Id) return false;
         if (!IsVideo && _handle == 0) return false;
 
@@ -503,6 +513,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     public bool SkipOnMixerProgram(double deltaSeconds)
     {
         if (_disposed) return false;
+        if (IsImage) return false;
         if (IsVideo && _videoPlayer.ActiveOwnerId != Model.Id) return false;
         if (!IsVideo && _handle == 0) return false;
 
@@ -538,9 +549,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
             _handle = 0;
         }
         _timer.Stop();
-        Position = 0;
-        Elapsed = "0:00";
-        Remaining = $"-{Duration}";
+        ResetTimelineDisplay();
         UpdateStatus(CueStatus.Stopped);
     }
 
@@ -615,6 +624,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
 
         if (IsVideo)
         {
+            bool isImage = IsImage;
             if (notifyVisualProgramChange)
                 VisualProgramChangeRequested?.Invoke(this, EventArgs.Empty);
 
@@ -628,19 +638,22 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
                 }
                 _videoPlayer.Resume();
                 UpdateStatus(CueStatus.Playing);
-                _timer.Start();
+                if (isImage)
+                    ResetTimelineDisplay();
+                else
+                    _timer.Start();
                 return;
             }
 
-            HookVideoEnd();
-            _suppressNaturalEnd = false;
+            if (isImage)
+                UnhookVideoEnd();
+            else
+                HookVideoEnd();
+            _suppressNaturalEnd = isImage;
             _crossfadeWindowFired = false;
             _cueOutHandled = false;
-            double imageDuration = MetadataService.IsImageFormat(Model.FilePath)
-                ? (Model.Duration > 0 ? Model.Duration : 5.0)
-                : 0;
             bool started = await _videoPlayer.PlayAsync(
-                Model.Id, Model.FilePath, Model.Volume, nativeLoop, imageDuration);
+                Model.Id, Model.FilePath, Model.Volume, nativeLoop);
             if (!started)
             {
                 UnhookVideoEnd();
@@ -649,12 +662,15 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
                 return;
             }
             var mediaStart = GetRegionStart();
-            if (mediaStart > 0.01)
+            if (!isImage && mediaStart > 0.01)
                 _videoPlayer.Seek(mediaStart);
             Model.LastPlayed = DateTime.UtcNow;
             Model.PlayCount++;
             UpdateStatus(CueStatus.Playing);
-            _timer.Start();
+            if (isImage)
+                ResetTimelineDisplay();
+            else
+                _timer.Start();
             NotifyStarted();
             return;
         }
@@ -783,9 +799,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
         _isUpdatingVolume = true;
         Volume = Model.Volume;
         _isUpdatingVolume = false;
-        Position = 0;
-        Elapsed = "0:00";
-        Remaining = $"-{Duration}";
+        ResetTimelineDisplay();
         UpdateStatus(CueStatus.Stopped);
     }
 
@@ -863,7 +877,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     {
         Application.Current?.Dispatcher.Invoke(() =>
         {
-            if (ownerId != Model.Id || !IsVideo || _suppressNaturalEnd) return;
+            if (ownerId != Model.Id || !IsVideo || IsImage || _suppressNaturalEnd) return;
             // Loop is handled inside VideoWindow — natural end only when not looping
             if (IsLoopPlaybackEnabled && RestartVideoLoopAtCueIn()) return;
             HandleNaturalEnd();
@@ -924,9 +938,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
         Volume = Model.Volume;
         _isUpdatingVolume = false;
         
-        Position = 0;
-        Elapsed = "0:00";
-        Remaining = $"-{Duration}";
+        ResetTimelineDisplay();
         UpdateStatus(CueStatus.Stopped);
     }
 
@@ -1015,6 +1027,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     private void EndSeek(double normalizedPosition)
     {
         _isSeeking = false;
+        if (IsImage) return;
         if (IsVideo && _videoPlayer.ActiveOwnerId == Model.Id)
         {
             double mediaStart = GetRegionStart();
@@ -1035,6 +1048,12 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     private void OnTimerTick(object? sender, EventArgs e)
     {
         if (_isSeeking) return;
+        if (IsImage)
+        {
+            _timer.Stop();
+            ResetTimelineDisplay();
+            return;
+        }
         if (IsVideo)
         {
             if (_videoPlayer.ActiveOwnerId != Model.Id) return;
@@ -1090,6 +1109,11 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
 
     private void UpdateMediaTimeline(double pos, double fileDuration)
     {
+        if (IsImage)
+        {
+            ResetTimelineDisplay();
+            return;
+        }
         double start = GetRegionStart();
         double end = GetRegionEnd(fileDuration);
         double len = Math.Max(0.001, end - start);
@@ -1180,6 +1204,24 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
         Position = 0;
         IsCountdownUrgent = IsPlaying && length <= 15;
         IsCountdownWarning = IsPlaying && length <= 30 && length > 15;
+    }
+
+    private void ResetTimelineDisplay()
+    {
+        Position = 0;
+        IsCountdownUrgent = false;
+        IsCountdownWarning = false;
+        if (IsImage)
+        {
+            Duration = "STILL";
+            Elapsed = "—";
+            Remaining = "—";
+            return;
+        }
+
+        Duration = FormatEffectiveDuration(Model.Duration);
+        Elapsed = "0:00";
+        Remaining = $"-{Duration}";
     }
 
     partial void OnVolumeChanged(double value)

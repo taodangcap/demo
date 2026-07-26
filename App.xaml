@@ -7,7 +7,6 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Assets/Themes/Colors.xaml"/>
                 <ResourceDictionary Source="Assets/Themes/Styles.xaml"/>
-                <ResourceDictionary Source="Assets/Themes/Animations.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

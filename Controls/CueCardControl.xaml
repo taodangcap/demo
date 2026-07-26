@@ -10,7 +10,6 @@
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolVis"/>
-        <conv:InverseBoolToVisibilityConverter x:Key="InvBoolVis"/>
         <conv:EmptyStringToVisibilityConverter x:Key="EmptyStringVis"/>
     </UserControl.Resources>
 

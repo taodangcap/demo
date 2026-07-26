@@ -9,10 +9,12 @@ publish/
 *.cache
 *.pdb
 *.nupkg
+*_wpftmp.csproj
 .vs/
 
 ## Installer / packaged output
 installer-output/
+artifacts/
 
 ## Runtime / local logs
 crash.log

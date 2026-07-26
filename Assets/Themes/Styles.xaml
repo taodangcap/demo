@@ -5,12 +5,6 @@
     <!--                 EFFECTS / MISC                          -->
     <!-- ════════════════════════════════════════════════════════ -->
 
-    <DropShadowEffect x:Key="CardShadow" BlurRadius="16" ShadowDepth="4"
-                      Direction="270" Color="#50000000" Opacity="0.6"/>
-
-    <DropShadowEffect x:Key="PlayingGlowEffect" BlurRadius="20" ShadowDepth="0"
-                      Color="#00E676" Opacity="0.8"/>
-
     <DropShadowEffect x:Key="SmallGlowEffect" BlurRadius="6" ShadowDepth="0"
                       Color="#FFFFFF" Opacity="0.5"/>
 
@@ -63,39 +57,6 @@
         <Setter Property="BorderBrush" Value="{StaticResource AccentPrimaryBrush}"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-    </Style>
-
-    <!-- Play button — large green -->
-    <Style x:Key="PlayButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="#1A3A1A"/>
-        <Setter Property="Foreground" Value="{StaticResource PlayingGreenBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource PlayingGreenDimBrush}"/>
-        <Setter Property="BorderThickness" Value="1.5"/>
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="FontWeight" Value="Bold"/>
-        <Setter Property="Padding" Value="0"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd"
-                            Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="3">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#20442A"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#0D2A0D"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
     </Style>
 
     <!-- Icon button (no border, hover only) -->
@@ -791,29 +752,58 @@
     <Style TargetType="MenuItem">
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Padding" Value="8,4,8,4"/>
+        <Setter Property="Padding" Value="10,5,10,5"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="MenuItem">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderThickness="0" CornerRadius="2">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition MinWidth="24" Width="Auto" SharedSizeGroup="Icon"/>
-                                <ColumnDefinition Width="4"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="30"/>
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="Shortcut"/>
-                            </Grid.ColumnDefinitions>
-                            
-                            <ContentPresenter x:Name="Icon" ContentSource="Icon" Margin="4,0" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                            <ContentPresenter ContentSource="Header" Grid.Column="2" VerticalAlignment="Center"/>
-                            <ContentPresenter ContentSource="InputGestureText" Grid.Column="4" Margin="8,0,4,0" VerticalAlignment="Center" TextElement.Foreground="{StaticResource TextMutedBrush}"/>
-                            
-                        </Grid>
-                    </Border>
+                    <Grid>
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                BorderThickness="0" CornerRadius="2">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition MinWidth="6" Width="Auto" SharedSizeGroup="Icon"/>
+                                    <ColumnDefinition Width="4"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="22"/>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="Shortcut"/>
+                                </Grid.ColumnDefinitions>
+
+                                <ContentPresenter ContentSource="Icon" Margin="2,0"
+                                                  VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                <ContentPresenter ContentSource="Header" Grid.Column="2"
+                                                  VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                                <TextBlock x:Name="SubmenuArrow" Grid.Column="3" Text="▶"
+                                           FontSize="9" Foreground="{TemplateBinding Foreground}"
+                                           Visibility="Collapsed" HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                                <ContentPresenter ContentSource="InputGestureText" Grid.Column="4"
+                                                  Margin="8,0,2,0" VerticalAlignment="Center"
+                                                  TextElement.Foreground="{StaticResource TextMutedBrush}"/>
+                            </Grid>
+                        </Border>
+
+                        <Popup x:Name="PART_Popup"
+                               Placement="Right" HorizontalOffset="-2" VerticalOffset="-3"
+                               PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                               IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                               AllowsTransparency="True" Focusable="False" StaysOpen="False"
+                               PopupAnimation="Fade">
+                            <Border Background="{StaticResource BgPanelBrush}"
+                                    BorderBrush="{StaticResource BorderStrongBrush}"
+                                    BorderThickness="1" CornerRadius="2" Padding="2">
+                                <ScrollViewer CanContentScroll="True">
+                                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="HasItems" Value="True">
+                            <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Visible"/>
+                        </Trigger>
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="#264F78"/>
+                            <Setter Property="Foreground" Value="White"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
