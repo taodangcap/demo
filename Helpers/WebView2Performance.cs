@@ -60,6 +60,7 @@ public static class WebView2Performance
         try
         {
             var s = core.Settings;
+            s.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
             s.IsStatusBarEnabled = false;
             s.AreDefaultContextMenusEnabled = false;
             s.IsZoomControlEnabled = false;

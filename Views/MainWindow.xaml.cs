@@ -415,7 +415,10 @@ public partial class MainWindow : Window
             // The operator/queue WebView is control-only. All audible Karaoke audio
             // must come exclusively from the Program WebView on the selected output.
             if (KaraokeOnlyControlWebView.CoreWebView2 is { } operatorCore)
+            {
+                Helpers.WebView2Performance.ApplyOutputSettings(operatorCore);
                 operatorCore.IsMuted = true;
+            }
             await HookWebViewEscBridgeAsync(KaraokeOnlyControlWebView);
             await ApplyKaraokeUrlsToWebViewsAsync(navigateRemote: true, navigatePlayer: false);
             SyncSoundEffectHotkeys();
