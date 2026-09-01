@@ -16,7 +16,11 @@ public static class WebView2Performance
     /// <summary>
     /// Flags chống throttle + ưu tiên GPU decode/raster — quan trọng cho màn OUTPUT không focus.
     /// </summary>
+    public const string ChromeUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
     public const string BrowserArgs =
+        "--user-agent=\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36\" " +
         "--autoplay-policy=no-user-gesture-required " +
         "--disable-background-timer-throttling " +
         "--disable-renderer-backgrounding " +
