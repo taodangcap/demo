@@ -368,8 +368,17 @@ public sealed class BassAudioEngine : IAudioEngine
 
     public void SetMasterVolume(double volume)
     {
-        if (!double.IsFinite(volume)) volume = 0;
-        Bass.Volume = (float)Math.Clamp(volume, 0, 1);
+        if (!_initialized) return; // Not initialized, skip
+        
+        try
+        {
+            if (!double.IsFinite(volume)) volume = 0;
+            Bass.Volume = (float)Math.Clamp(volume, 0, 1);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SetMasterVolume error: {ex.Message}");
+        }
     }
 
     public void SetLoop(int handle, bool loop)
