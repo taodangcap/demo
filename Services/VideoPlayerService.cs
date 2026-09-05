@@ -739,63 +739,83 @@ public sealed class VideoPlayerService : IVideoPlayerService
     /// </param>
     public static void PlaceOnScreen(Window window, Screen screen, bool showInTaskbar = true, bool forceFullscreen = false)
     {
-        var bounds = screen.Bounds;
-        if (!forceFullscreen && screen.Primary && window is VideoWindow)
+        if (window == null || screen == null)
+            return; // Prevent null reference exception
+
+        try
         {
-            window.Topmost = false;
-            window.WindowStyle = WindowStyle.SingleBorderWindow;
-            window.ResizeMode = ResizeMode.CanResize;
+            var bounds = screen.Bounds;
+            if (!forceFullscreen && screen.Primary && window is VideoWindow)
+            {
+                window.Topmost = false;
+                window.WindowStyle = WindowStyle.SingleBorderWindow;
+                window.ResizeMode = ResizeMode.CanResize;
+                window.ShowInTaskbar = showInTaskbar;
+                window.ShowActivated = true;
+                window.WindowState = WindowState.Normal;
+                window.Width = Math.Min(960, bounds.Width * 0.8);
+                window.Height = Math.Min(540, bounds.Height * 0.8);
+                window.Left = bounds.Left + (bounds.Width - window.Width) / 2;
+                window.Top = bounds.Top + (bounds.Height - window.Height) / 2;
+                if (window is VideoWindow primaryVideoWindow)
+                    primaryVideoWindow.RefreshProgramLayout();
+                return;
+            }
+
+            window.WindowStyle = WindowStyle.None;
+            window.ResizeMode = ResizeMode.NoResize;
             window.ShowInTaskbar = showInTaskbar;
-            window.ShowActivated = true;
+            window.Topmost = true;
+            // VideoWindow (USB + karaoke OUTPUT): activate 1 lần để WebView/MediaElement không bị background-throttle
+            window.ShowActivated = window is VideoWindow;
             window.WindowState = WindowState.Normal;
-            window.Width = Math.Min(960, bounds.Width * 0.8);
-            window.Height = Math.Min(540, bounds.Height * 0.8);
-            window.Left = bounds.Left + (bounds.Width - window.Width) / 2;
-            window.Top = bounds.Top + (bounds.Height - window.Height) / 2;
-            if (window is VideoWindow primaryVideoWindow)
-                primaryVideoWindow.RefreshProgramLayout();
-            return;
+            // Giảm jank compose: làm tròn pixel, không blur
+            System.Windows.Media.RenderOptions.SetBitmapScalingMode(window, System.Windows.Media.BitmapScalingMode.NearestNeighbor);
+            window.UseLayoutRounding = true;
+            window.SnapsToDevicePixels = true;
+
+            var hwnd = new WindowInteropHelper(window).EnsureHandle();
+            // TOPMOST + full monitor bounds (tránh Maximized nhảy DPI)
+            SetWindowPos(hwnd, HWND_TOPMOST, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            if (window is VideoWindow fullscreenVideoWindow)
+                fullscreenVideoWindow.RefreshProgramLayout();
+            // Force redraw after move — WebView đôi khi kẹt 1 frame đen
+            try { window.InvalidateVisual(); } catch { /* ignore */ }
         }
-
-        window.WindowStyle = WindowStyle.None;
-        window.ResizeMode = ResizeMode.NoResize;
-        window.ShowInTaskbar = showInTaskbar;
-        window.Topmost = true;
-        // VideoWindow (USB + karaoke OUTPUT): activate 1 lần để WebView/MediaElement không bị background-throttle
-        window.ShowActivated = window is VideoWindow;
-        window.WindowState = WindowState.Normal;
-        // Giảm jank compose: làm tròn pixel, không blur
-        System.Windows.Media.RenderOptions.SetBitmapScalingMode(window, System.Windows.Media.BitmapScalingMode.NearestNeighbor);
-        window.UseLayoutRounding = true;
-        window.SnapsToDevicePixels = true;
-
-        var hwnd = new WindowInteropHelper(window).EnsureHandle();
-        // TOPMOST + full monitor bounds (tránh Maximized nhảy DPI)
-        SetWindowPos(hwnd, HWND_TOPMOST, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        if (window is VideoWindow fullscreenVideoWindow)
-            fullscreenVideoWindow.RefreshProgramLayout();
-        // Force redraw after move — WebView đôi khi kẹt 1 frame đen
-        try { window.InvalidateVisual(); } catch { /* ignore */ }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"PlaceOnScreen error: {ex.Message}");
+        }
     }
 
     public static void PlaceWindowedOnScreen(Window window, Screen screen, int preferredWidth = 960, int preferredHeight = 540)
     {
-        var area = screen.WorkingArea;
-        int width = Math.Min(preferredWidth, (int)(area.Width * 0.8));
-        int height = Math.Min(preferredHeight, (int)(area.Height * 0.8));
-        int left = area.Left + (area.Width - width) / 2;
-        int top = area.Top + (area.Height - height) / 2;
+        if (window == null || screen == null)
+            return;
 
-        window.Topmost = false;
-        window.WindowState = WindowState.Normal;
-        window.WindowStyle = WindowStyle.SingleBorderWindow;
-        window.ResizeMode = ResizeMode.CanResize;
-        window.ShowInTaskbar = false;
-        var hwnd = new WindowInteropHelper(window).EnsureHandle();
-        SetWindowPos(hwnd, IntPtr.Zero, left, top, width, height, SWP_NOACTIVATE);
-        if (window is VideoWindow windowedVideoWindow)
-            windowedVideoWindow.RefreshProgramLayout();
+        try
+        {
+            var area = screen.WorkingArea;
+            int width = Math.Min(preferredWidth, (int)(area.Width * 0.8));
+            int height = Math.Min(preferredHeight, (int)(area.Height * 0.8));
+            int left = area.Left + (area.Width - width) / 2;
+            int top = area.Top + (area.Height - height) / 2;
+
+            window.Topmost = false;
+            window.WindowState = WindowState.Normal;
+            window.WindowStyle = WindowStyle.SingleBorderWindow;
+            window.ResizeMode = ResizeMode.CanResize;
+            window.ShowInTaskbar = false;
+            var hwnd = new WindowInteropHelper(window).EnsureHandle();
+            SetWindowPos(hwnd, IntPtr.Zero, left, top, width, height, SWP_NOACTIVATE);
+            if (window is VideoWindow windowedVideoWindow)
+                windowedVideoWindow.RefreshProgramLayout();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"PlaceWindowedOnScreen error: {ex.Message}");
+        }
     }
 
     public static void PlaceOffScreen(Window window)
