@@ -36,6 +36,9 @@ public sealed class ImportService : IImportService
         IProgress<ImportProgress>? progress = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
+        if (_metadata == null)
+            throw new InvalidOperationException("MetadataService not initialized");
+
         // Collect all matching files first
         var allFiles = await Task.Run(() => CollectFiles(paths, targetType), ct);
         allFiles.Sort(NaturalSortComparer.Instance);
@@ -52,13 +55,27 @@ public sealed class ImportService : IImportService
             CueModel? cue = null;
             try
             {
+                // Verify file exists before processing
+                if (!File.Exists(file))
+                {
+                    skipped++;
+                    continue;
+                }
+
                 var meta = await _metadata.ReadAsync(file);
                 ct.ThrowIfCancellationRequested();
+                
+                if (meta == null)
+                {
+                    skipped++;
+                    continue;
+                }
+
                 cue = new CueModel
                 {
-                    Title = meta.Title,
-                    Artist = meta.Artist,
-                    Album = meta.Album,
+                    Title = meta.Title ?? "Unknown",
+                    Artist = meta.Artist ?? "Unknown",
+                    Album = meta.Album ?? "Unknown",
                     FilePath = file,
                     Duration = MetadataService.IsImageFormat(file)
                         ? 0
@@ -68,8 +85,13 @@ public sealed class ImportService : IImportService
                 };
                 processed++;
             }
-            catch
+            catch (OperationCanceledException)
             {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Import error for {file}: {ex.Message}");
                 skipped++;
             }
 
