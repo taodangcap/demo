@@ -411,16 +411,25 @@ public partial class MainWindow : Window
             ApplyResponsiveLayout();
             LoadKaraokeAudioOutputs(applySavedSelection: true);
 
-            await KaraokeOnlyControlWebView.EnsureCoreWebView2Async(null);
-            // The operator/queue WebView is control-only. All audible Karaoke audio
-            // must come exclusively from the Program WebView on the selected output.
-            if (KaraokeOnlyControlWebView.CoreWebView2 is { } operatorCore)
+            try
             {
-                Helpers.WebView2Performance.ApplyOutputSettings(operatorCore);
-                operatorCore.IsMuted = true;
+                await Helpers.WebView2Performance.EnsureOptimizedAsync(KaraokeOnlyControlWebView);
+                // The operator/queue WebView is control-only. All audible Karaoke audio
+                // must come exclusively from the Program WebView on the selected output.
+                if (KaraokeOnlyControlWebView.CoreWebView2 is { } operatorCore)
+                {
+                    Helpers.WebView2Performance.ApplyOutputSettings(operatorCore);
+                    operatorCore.IsMuted = true;
+                }
+                await HookWebViewEscBridgeAsync(KaraokeOnlyControlWebView);
+                await ApplyKaraokeUrlsToWebViewsAsync(navigateRemote: true, navigatePlayer: false);
             }
-            await HookWebViewEscBridgeAsync(KaraokeOnlyControlWebView);
-            await ApplyKaraokeUrlsToWebViewsAsync(navigateRemote: true, navigatePlayer: false);
+            catch (Exception ex)
+            {
+                if (ViewModel is not null)
+                    ViewModel.StatusMessage = $"Không thể khởi tạo WebView2: {ex.Message}";
+            }
+
             SyncSoundEffectHotkeys();
             RefreshSoundEffectsBoard();
             _ = CheckForUpdatesAsync(interactive: false);
@@ -430,6 +439,11 @@ public partial class MainWindow : Window
         }
         catch (ObjectDisposedException) { }
         catch (InvalidOperationException) { }
+        catch (Exception ex)
+        {
+            if (ViewModel is not null)
+                ViewModel.StatusMessage = $"Khởi chạy thất bại: {ex.Message}";
+        }
     }
 
     private void OnKaraokeUrlsChanged(object? sender, EventArgs e)

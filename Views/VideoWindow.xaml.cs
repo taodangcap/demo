@@ -498,6 +498,11 @@ public partial class VideoWindow : Window
         }
         catch (ObjectDisposedException) { return false; }
         catch (InvalidOperationException) { return false; }
+        catch (Exception ex)
+        {
+            KaraokeProcessFailed?.Invoke(this, ex.Message);
+            return false;
+        }
     }
 
     private void HookKaraokeProcessFailure()
@@ -529,7 +534,10 @@ public partial class VideoWindow : Window
             core.WebMessageReceived -= OnKaraokeWebMessageReceived;
             core.WebMessageReceived += OnKaraokeWebMessageReceived;
             await core.AddScriptToExecuteOnDocumentCreatedAsync(
+                "(function(){" +
+                "if(window.self !== window.top) return;" +
                 "(async function(){try{" +
+                "if(!location.hostname.includes('huy.sale') && !location.hostname.includes('localhost'))return;" +
                 "if(sessionStorage.getItem('__scpCacheResetV3'))return;" +
                 "sessionStorage.setItem('__scpCacheResetV3','1');let changed=false;" +
                 "if('serviceWorker' in navigator){let regs=await navigator.serviceWorker.getRegistrations();" +
@@ -547,7 +555,8 @@ public partial class VideoWindow : Window
                 ".find(function(m){return Number.isFinite(m.duration)&&m.duration>0;});};" +
                 "window.setInterval(function(){try{var m=window.__scpMedia();" +
                 "if(m&&window.chrome&&window.chrome.webview){window.chrome.webview.postMessage(JSON.stringify({" +
-                "type:'karaoke',action:'progress',position:m.currentTime||0,duration:m.duration||0}));}}catch(_){}},500);");
+                "type:'karaoke',action:'progress',position:m.currentTime||0,duration:m.duration||0}));}}catch(_){}},500);" +
+                "})();");
             _karaokeHooksInstalled = true;
             await ApplyKaraokeAutoNextAsync();
         }

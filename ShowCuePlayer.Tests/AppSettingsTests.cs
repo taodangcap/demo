@@ -47,7 +47,7 @@ public sealed class AppSettingsTests
         Assert.IsTrue(settings.Hotkeys.ContainsKey(HotkeyActions.StopAll));
         Assert.IsFalse(settings.Hotkeys.ContainsKey("Go"));
         Assert.IsFalse(settings.Hotkeys.ContainsKey("ToggleLedBlackout"));
-        Assert.HasCount(HotkeyActions.Catalog.Count, settings.Hotkeys);
+        Assert.AreEqual(HotkeyActions.Catalog.Count, settings.Hotkeys.Count);
     }
 
     [TestMethod]
@@ -79,7 +79,7 @@ public sealed class AppSettingsTests
 
         settings.Validate();
 
-        Assert.HasCount(2, settings.KaraokeSoundEffects);
+        Assert.AreEqual(2, settings.KaraokeSoundEffects.Count);
         Assert.AreEqual("applause", settings.KaraokeSoundEffects[0].Name);
         Assert.AreNotEqual(settings.KaraokeSoundEffects[0].Id, settings.KaraokeSoundEffects[1].Id);
         Assert.AreEqual("Shift+F2", settings.KaraokeSoundEffects[1].HotkeyText);

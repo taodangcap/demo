@@ -37,7 +37,7 @@ public sealed class ProjectServiceTests
 
             Assert.IsNotNull(loaded);
             Assert.IsNotNull(loaded.KaraokeSoundEffects);
-            Assert.HasCount(1, loaded.KaraokeSoundEffects);
+            Assert.AreEqual(1, loaded.KaraokeSoundEffects.Count);
             Assert.AreEqual("Vỗ tay", loaded.KaraokeSoundEffects[0].Name);
             Assert.AreEqual(@"D:\SoundFX\applause.mp3", loaded.KaraokeSoundEffects[0].FilePath);
             Assert.IsTrue(loaded.KaraokeSoundEffects[0].Loop);

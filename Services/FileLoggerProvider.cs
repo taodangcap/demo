@@ -36,8 +36,17 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
     public void Dispose() => _loggers.Clear();
 
-    private sealed class FileLogger(string category, Action<string> writer) : ILogger
+    private sealed class FileLogger : ILogger
     {
+        private readonly string _category;
+        private readonly Action<string> _writer;
+
+        public FileLogger(string category, Action<string> writer)
+        {
+            _category = category;
+            _writer = writer;
+        }
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
 
@@ -46,7 +55,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
         {
             if (!IsEnabled(logLevel)) return;
             var message = formatter(state, exception);
-            writer($"{DateTimeOffset.Now:O} [{logLevel}] {category}: {message}{Environment.NewLine}{exception}{Environment.NewLine}");
+            _writer($"{DateTimeOffset.Now:O} [{logLevel}] {_category}: {message}{Environment.NewLine}{exception}{Environment.NewLine}");
         }
     }
 }

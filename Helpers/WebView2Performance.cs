@@ -20,7 +20,6 @@ public static class WebView2Performance
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
     public const string BrowserArgs =
-        "--user-agent=\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36\" " +
         "--autoplay-policy=no-user-gesture-required " +
         "--disable-background-timer-throttling " +
         "--disable-renderer-backgrounding " +
@@ -39,16 +38,33 @@ public static class WebView2Performance
         {
             if (_outputEnv is not null) return _outputEnv;
 
-            var userData = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ShowCuePlayer", "WebView2-Output");
-            Directory.CreateDirectory(userData);
-
             var options = new CoreWebView2EnvironmentOptions(BrowserArgs);
-            _outputEnv = await CoreWebView2Environment.CreateAsync(
-                browserExecutableFolder: null,
-                userDataFolder: userData,
-                options: options).ConfigureAwait(true);
+            string baseFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ShowCuePlayer");
+            Directory.CreateDirectory(baseFolder);
+
+            string primaryUserData = Path.Combine(baseFolder, "WebView2-Output");
+            Directory.CreateDirectory(primaryUserData);
+
+            try
+            {
+                _outputEnv = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: primaryUserData,
+                    options: options).ConfigureAwait(true);
+            }
+            catch (Exception)
+            {
+                // Fallback to process-specific directory if primary user data folder is locked (0x800700AA) or inaccessible
+                string fallbackUserData = Path.Combine(baseFolder, $"WebView2-{Environment.ProcessId}");
+                Directory.CreateDirectory(fallbackUserData);
+                _outputEnv = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: fallbackUserData,
+                    options: options).ConfigureAwait(true);
+            }
+
             return _outputEnv;
         }
         finally
@@ -64,7 +80,6 @@ public static class WebView2Performance
         try
         {
             var s = core.Settings;
-            s.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
             s.IsStatusBarEnabled = false;
             s.AreDefaultContextMenusEnabled = false;
             s.IsZoomControlEnabled = false;
@@ -79,7 +94,31 @@ public static class WebView2Performance
         }
         catch { /* older runtime */ }
 
+        try
+        {
+            core.AddWebResourceRequestedFilter("https://*.youtube.com/*", CoreWebView2WebResourceContext.All);
+            core.AddWebResourceRequestedFilter("https://*.youtube-nocookie.com/*", CoreWebView2WebResourceContext.All);
+            core.AddWebResourceRequestedFilter("https://*.googlevideo.com/*", CoreWebView2WebResourceContext.All);
+
+            core.WebResourceRequested -= OnWebResourceRequested;
+            core.WebResourceRequested += OnWebResourceRequested;
+        }
+        catch { /* ignore */ }
+
         try { core.IsMuted = false; }
+        catch { /* ignore */ }
+    }
+
+    private static void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        try
+        {
+            var headers = e.Request.Headers;
+            if (!headers.Contains("Referer") || string.IsNullOrWhiteSpace(headers.GetHeader("Referer")))
+            {
+                headers.SetHeader("Referer", "https://www.youtube.com/");
+            }
+        }
         catch { /* ignore */ }
     }
 
