@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: demo
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +26,7 @@ jobs:
       - name: Read version from tag
         id: version
         shell: pwsh
+        working-directory: .
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release tag: $version" }
