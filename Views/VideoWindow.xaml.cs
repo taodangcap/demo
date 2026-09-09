@@ -455,6 +455,7 @@ public partial class VideoWindow : Window
                     completed.TrySetResult(args.IsSuccess);
             };
             KaraokeWebView.Visibility = Visibility.Visible;
+            Helpers.WebView2Performance.TrimMemoryWorkingSet(core, lowMemory: false);
             try
             {
                 await _karaokeNavigationStartGate.WaitAsync();
@@ -1048,6 +1049,7 @@ public partial class VideoWindow : Window
         try { KaraokeWebView.CoreWebView2?.Stop(); } catch { /* ignore */ }
         _isKaraokeNavigating = false;
         KaraokeWebView.Visibility = Visibility.Collapsed;
+        Helpers.WebView2Performance.TrimMemoryWorkingSet(KaraokeWebView.CoreWebView2, lowMemory: true);
         _isKaraokePlaying = false;
         try
         {
@@ -1069,6 +1071,7 @@ public partial class VideoWindow : Window
     {
         PauseKaraokeMedia();
         KaraokeWebView.Visibility = Visibility.Collapsed;
+        Helpers.WebView2Performance.TrimMemoryWorkingSet(KaraokeWebView.CoreWebView2, lowMemory: true);
         _isKaraokePlaying = false;
         IdlePanel.Visibility = Visibility.Collapsed;
         Player.Stop();

@@ -1323,7 +1323,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Settings.Current.KaraokeSessionId = value?.Trim() ?? string.Empty;
         if (IsUsingDefaultSession)
             Settings.Current.KaraokeDefaultSessionId = Settings.Current.KaraokeSessionId;
-        _ = Settings.SaveAsync();
+        _ = Settings.SaveDebouncedAsync();
         RefreshKaraokeStatusUi();
     }
 
@@ -1333,7 +1333,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Settings.Current.KaraokeSessionPassword = pwd;
         if (IsUsingDefaultSession)
             Settings.Current.KaraokeDefaultPassword = pwd;
-        _ = Settings.SaveAsync();
+        _ = Settings.SaveDebouncedAsync();
         RebuildKaraokeUrls();
         KaraokeUrlsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -1341,13 +1341,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     partial void OnKaraokeDefaultSessionIdChanged(string value)
     {
         Settings.Current.KaraokeDefaultSessionId = value?.Trim() ?? "MIXH88";
-        _ = Settings.SaveAsync();
+        _ = Settings.SaveDebouncedAsync();
     }
 
     partial void OnKaraokeDefaultPasswordChanged(string value)
     {
         Settings.Current.KaraokeDefaultPassword = value?.Trim() ?? "1234";
-        _ = Settings.SaveAsync();
+        _ = Settings.SaveDebouncedAsync();
     }
 
     private void RebuildKaraokeUrls()

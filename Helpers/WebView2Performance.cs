@@ -137,4 +137,19 @@ public static class WebView2Performance
         }
         catch { /* ignore */ }
     }
+
+    /// <summary>
+    /// Giảm tải bộ nhớ RAM khi WebView2 không hoạt động hoặc ở chế độ Standby/Blackout.
+    /// </summary>
+    public static void TrimMemoryWorkingSet(CoreWebView2? core, bool lowMemory)
+    {
+        if (core is null) return;
+        try
+        {
+            core.MemoryUsageTargetLevel = lowMemory
+                ? CoreWebView2MemoryUsageTargetLevel.Low
+                : CoreWebView2MemoryUsageTargetLevel.Normal;
+        }
+        catch { /* older WebView2 runtime fallback */ }
+    }
 }
