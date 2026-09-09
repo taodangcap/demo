@@ -1622,6 +1622,11 @@ public partial class MainWindow : Window
         ViewModel?.ApplyKaraokeSessionCommand.Execute(null);
     }
 
+    private void BtnKaraokeDefaultSession_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel?.UseDefaultKaraokeSessionCommand.Execute(null);
+    }
+
     private void BtnKaraokeNewSession_Click(object sender, RoutedEventArgs e)
     {
         ViewModel?.NewKaraokeSessionCommand.Execute(null);

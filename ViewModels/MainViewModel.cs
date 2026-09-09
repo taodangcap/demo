@@ -157,6 +157,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     // Karaoke session (1 ô → remote + player) — operator-only desk
     [ObservableProperty] private string _karaokeSessionId = string.Empty;
+    [ObservableProperty] private string _karaokeDefaultSessionId = "MIXH88";
+    [ObservableProperty] private string _karaokeDefaultPassword = "1234";
+    [ObservableProperty] private string _karaokeSessionPassword = "1234";
+    [ObservableProperty] private bool _isUsingDefaultSession = true;
     [ObservableProperty] private string _karaokeRemoteUrl = "https://huy.sale/remote?session=";
     /// <summary>OUTPUT master player URL (registers remote session).</summary>
     [ObservableProperty] private string _karaokePlayerUrl = "https://huy.sale/player";
@@ -430,8 +434,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (Settings.Current.AutoSaveEnabled)
             _autoSaveTimer.Start();
 
-        // Karaoke session đã lưu
-        KaraokeSessionId = Settings.Current.KaraokeSessionId ?? string.Empty;
+        // Karaoke session & password đã lưu
+        KaraokeDefaultSessionId = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultSessionId) ? "MIXH88" : Settings.Current.KaraokeDefaultSessionId;
+        KaraokeDefaultPassword = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultPassword) ? "1234" : Settings.Current.KaraokeDefaultPassword;
+        IsUsingDefaultSession = Settings.Current.KaraokeUseDefaultSession;
+        if (IsUsingDefaultSession)
+        {
+            KaraokeSessionId = KaraokeDefaultSessionId;
+            KaraokeSessionPassword = KaraokeDefaultPassword;
+        }
+        else
+        {
+            KaraokeSessionId = string.IsNullOrWhiteSpace(Settings.Current.KaraokeSessionId) ? KaraokeDefaultSessionId : Settings.Current.KaraokeSessionId;
+            KaraokeSessionPassword = string.IsNullOrWhiteSpace(Settings.Current.KaraokeSessionPassword) ? KaraokeDefaultPassword : Settings.Current.KaraokeSessionPassword;
+        }
+
         if (!Settings.Current.KaraokeSafeTakeDefaultsApplied)
         {
             Settings.Current.KaraokeAutoNextEnabled = false;
@@ -1304,8 +1321,33 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         RebuildKaraokeUrls();
         Settings.Current.KaraokeSessionId = value?.Trim() ?? string.Empty;
+        if (IsUsingDefaultSession)
+            Settings.Current.KaraokeDefaultSessionId = Settings.Current.KaraokeSessionId;
         _ = Settings.SaveAsync();
         RefreshKaraokeStatusUi();
+    }
+
+    partial void OnKaraokeSessionPasswordChanged(string value)
+    {
+        var pwd = value?.Trim() ?? string.Empty;
+        Settings.Current.KaraokeSessionPassword = pwd;
+        if (IsUsingDefaultSession)
+            Settings.Current.KaraokeDefaultPassword = pwd;
+        _ = Settings.SaveAsync();
+        RebuildKaraokeUrls();
+        KaraokeUrlsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    partial void OnKaraokeDefaultSessionIdChanged(string value)
+    {
+        Settings.Current.KaraokeDefaultSessionId = value?.Trim() ?? "MIXH88";
+        _ = Settings.SaveAsync();
+    }
+
+    partial void OnKaraokeDefaultPasswordChanged(string value)
+    {
+        Settings.Current.KaraokeDefaultPassword = value?.Trim() ?? "1234";
+        _ = Settings.SaveAsync();
     }
 
     private void RebuildKaraokeUrls()
@@ -1353,8 +1395,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         KaraokeRemoteUrl = AppendOrReplaceQuery(KaraokeRemoteUrl, "ui", "pc");
         KaraokeRemoteUrl = AppendOrReplaceQuery(KaraokeRemoteUrl, "autonext", KaraokeAutoNextEnabled ? "1" : "0");
 
+        var pwd = (KaraokeSessionPassword ?? string.Empty).Trim();
+        if (!string.IsNullOrEmpty(pwd))
+        {
+            // Tự động chuyển mật khẩu vào URL remote của operator để người dùng PC không phải gõ lại
+            KaraokeRemoteUrl = AppendOrReplaceQuery(KaraokeRemoteUrl, "pwd", pwd);
+        }
+
         // Chỉ tạo một player master cho PROGRAM; Mixer PREVIEW không chạy WebView.
-        var player = StripQueryParams(playerBase, "session", "token", "embed", "host", "master", "preview");
+        var player = StripQueryParams(playerBase, "session", "token", "embed", "host", "master", "preview", "pwd", "pin");
         if (!string.IsNullOrEmpty(session))
         {
             player = AppendOrReplaceQuery(player, "session", session);
@@ -1363,6 +1412,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         KaraokePlayerUrl = AppendOrReplaceQuery(player, "master", "1");
         KaraokePlayerUrl = AppendOrReplaceQuery(KaraokePlayerUrl, "autonext", KaraokeAutoNextEnabled ? "1" : "0");
+        if (!string.IsNullOrEmpty(pwd))
+        {
+            KaraokePlayerUrl = AppendOrReplaceQuery(KaraokePlayerUrl, "pwd", pwd);
+        }
     }
 
     /// <summary>
@@ -1476,7 +1529,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             : "WebView: tự động chuyển bài OFF";
     }
 
-    /// <summary>Tạo session 6 ký tự A-Z0-9 nếu trống (ShowCue + KTV chung mã).</summary>
+    /// <summary>Đảm bảo session và mật khẩu hợp lệ (ShowCue + KTV chung mã).</summary>
     public string EnsureKaraokeSessionId()
     {
         var session = (KaraokeSessionId ?? string.Empty).Trim();
@@ -1491,7 +1544,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     return sid;
                 }
             }
+
+            if (Settings.Current.KaraokeUseDefaultSession)
+            {
+                IsUsingDefaultSession = true;
+                KaraokeSessionId = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultSessionId) ? "MIXH88" : Settings.Current.KaraokeDefaultSessionId;
+                KaraokeSessionPassword = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultPassword) ? "1234" : Settings.Current.KaraokeDefaultPassword;
+                return KaraokeSessionId;
+            }
+
             KaraokeSessionId = GenerateKaraokeSessionId();
+            KaraokeSessionPassword = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultPassword) ? "1234" : Settings.Current.KaraokeDefaultPassword;
             return KaraokeSessionId;
         }
         return session;
@@ -1544,7 +1607,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
             var parts = (uri.Query.TrimStart('?'))
                 .Split('&', StringSplitOptions.RemoveEmptyEntries)
-                .Where(p => !p.Split('=', 2)[0].Equals(key, StringComparison.OrdinalIgnoreCase))
+                .Where(p => !p.StartsWith($"{key}=", StringComparison.OrdinalIgnoreCase))
                 .ToList();
             parts.Add($"{key}={Uri.EscapeDataString(value ?? "")}");
             var ub = new UriBuilder(uri) { Query = string.Join("&", parts) };
@@ -1583,6 +1646,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         EnsureKaraokeSessionId();
         RebuildKaraokeUrls();
         Settings.Current.KaraokeSessionId = KaraokeSessionId?.Trim() ?? string.Empty;
+        Settings.Current.KaraokeSessionPassword = KaraokeSessionPassword?.Trim() ?? string.Empty;
         _ = Settings.SaveAsync();
         KaraokeUrlsChanged?.Invoke(this, EventArgs.Empty);
         RefreshKaraokeStatusUi();
@@ -1591,22 +1655,48 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             : $"Karaoke session: {KaraokeSessionId} · đã đồng bộ URL (operator)";
     }
 
-    /// <summary>Tạo session mới (operator). Không share link.</summary>
+    /// <summary>Chuyển sang session mặc định đã cấu hình sẵn kèm mật khẩu bảo vệ.</summary>
+    [RelayCommand]
+    private void UseDefaultKaraokeSession()
+    {
+        if (GuardIfLocked("change Karaoke session")) return;
+        if (RejectKaraokeSourceChangeWhileFrozen()) return;
+
+        IsUsingDefaultSession = true;
+        Settings.Current.KaraokeUseDefaultSession = true;
+        KaraokeSessionId = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultSessionId) ? "MIXH88" : Settings.Current.KaraokeDefaultSessionId;
+        KaraokeSessionPassword = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultPassword) ? "1234" : Settings.Current.KaraokeDefaultPassword;
+        KaraokeMasterReady = false;
+        KaraokeNowTitle = "—";
+        RebuildKaraokeUrls();
+        Settings.Current.KaraokeSessionId = KaraokeSessionId;
+        Settings.Current.KaraokeSessionPassword = KaraokeSessionPassword;
+        _ = Settings.SaveAsync();
+        KaraokeUrlsChanged?.Invoke(this, EventArgs.Empty);
+        RefreshKaraokeStatusUi();
+        StatusMessage = $"Session mặc định: {KaraokeSessionId} · PIN: {KaraokeSessionPassword}";
+    }
+
+    /// <summary>Tạo session ngẫu nhiên mới (operator). Không share link.</summary>
     [RelayCommand]
     private void NewKaraokeSession()
     {
         if (GuardIfLocked("create Karaoke session")) return;
         if (RejectKaraokeSourceChangeWhileFrozen()) return;
 
+        IsUsingDefaultSession = false;
+        Settings.Current.KaraokeUseDefaultSession = false;
         KaraokeSessionId = GenerateKaraokeSessionId();
+        KaraokeSessionPassword = string.IsNullOrWhiteSpace(Settings.Current.KaraokeDefaultPassword) ? "1234" : Settings.Current.KaraokeDefaultPassword;
         KaraokeMasterReady = false;
         KaraokeNowTitle = "—";
         RebuildKaraokeUrls();
         Settings.Current.KaraokeSessionId = KaraokeSessionId;
+        Settings.Current.KaraokeSessionPassword = KaraokeSessionPassword;
         _ = Settings.SaveAsync();
         KaraokeUrlsChanged?.Invoke(this, EventArgs.Empty);
         RefreshKaraokeStatusUi();
-        StatusMessage = $"Session mới: {KaraokeSessionId} · chỉ bạn dùng (không share)";
+        StatusMessage = $"Session ngẫu nhiên mới: {KaraokeSessionId} · PIN: {KaraokeSessionPassword}";
     }
 
     private bool RejectKaraokeSourceChangeWhileFrozen()

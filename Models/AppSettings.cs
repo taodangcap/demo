@@ -52,6 +52,10 @@ public class AppSettings
 
     // Karaoke (huy.sale)
     public string KaraokeSessionId { get; set; } = string.Empty;
+    public string KaraokeDefaultSessionId { get; set; } = "MIXH88";
+    public string KaraokeDefaultPassword { get; set; } = "1234";
+    public string KaraokeSessionPassword { get; set; } = "1234";
+    public bool KaraokeUseDefaultSession { get; set; } = true;
     public string KaraokeRemoteBaseUrl { get; set; } = "https://huy.sale/remote?session=";
     public string KaraokePlayerUrl { get; set; } = "https://huy.sale/player";
     /// <summary>Remote WebView layout: phone | pc</summary>
