@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Trang chủ - Trang giới thiệu cá nhân -->
+  <url>
+    <loc>https://www.trinhquanghuy.net/</loc>
+    <lastmod>2026-03-02</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  
+  <!-- Trang sản phẩm Karaoke -->
+  <url>
+    <loc>https://www.trinhquanghuy.net/karaoke</loc>
+    <lastmod>2026-03-02</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  
+  <!-- Trang điều khiển Remote -->
+  <url>
+    <loc>https://www.trinhquanghuy.net/remote</loc>
+    <lastmod>2026-03-02</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  
+  <!-- Trang trạng thái hệ thống -->
+  <url>
+    <loc>https://www.trinhquanghuy.net/status</loc>
+    <lastmod>2026-03-02</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
+</urlset>

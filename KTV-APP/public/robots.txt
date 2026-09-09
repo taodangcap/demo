@@ -1,0 +1,10 @@
+# Robots.txt - Hướng dẫn robot SEO cho trinhquanghuy.net
+
+User-agent: *
+Allow: /
+
+# Chặn các trang điều khiển và trạng thái nếu không cần index (không bắt buộc, giữ cho kết quả tìm kiếm đẹp hơn)
+# Disallow: /player (nếu bạn không muốn index trang trình phát)
+
+# Chỉ định vị trí Google Sitemap
+Sitemap: https://www.trinhquanghuy.net/sitemap.xml

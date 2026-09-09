@@ -1,0 +1,33 @@
+## .NET build
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.cache
+*.pdb
+*.nupkg
+*_wpftmp.csproj
+.vs/
+
+## Installer / packaged output
+installer-output/
+artifacts/
+
+## Runtime / local logs
+crash.log
+audio_debug.log
+*.db
+*.db-shm
+*.db-wal
+**/ShowCuePlayer.exe.WebView2/
+
+## OS / IDE
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+*.swp
+*~

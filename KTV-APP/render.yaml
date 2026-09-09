@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: karaoke-relay-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: VITE_SOUNDCLOUD_CLIENT_ID
+        value: KKzJxmw11tYpCs6T24P4uUYhqmjalG6M
+      - key: NODE_ENV
+        value: production

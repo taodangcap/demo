@@ -1,0 +1,78 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!--           BASE DARK PALETTE (OBS)          -->
+    <!-- ═══════════════════════════════════════════ -->
+    <Color x:Key="BgDeepColor">#1C1C1C</Color>
+    <Color x:Key="BgBaseColor">#222222</Color>
+    <Color x:Key="BgPanelColor">#2B2B2B</Color>
+    <Color x:Key="BgCardColor">#333333</Color>
+    <Color x:Key="BgElevatedColor">#444444</Color>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!--           BORDER COLORS                    -->
+    <!-- ═══════════════════════════════════════════ -->
+    <Color x:Key="BorderSubtleColor">#3C3C3C</Color>
+    <Color x:Key="BorderDefaultColor">#4E4E4E</Color>
+    <Color x:Key="BorderStrongColor">#666666</Color>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!--           TEXT COLORS (high contrast)      -->
+    <!-- ═══════════════════════════════════════════ -->
+    <Color x:Key="TextPrimaryColor">#F5F5F5</Color>
+    <Color x:Key="TextSecondaryColor">#C8C8C8</Color>
+    <Color x:Key="TextMutedColor">#A0A0A0</Color>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!--           ACCENT / BRAND (OBS Blue)        -->
+    <!-- ═══════════════════════════════════════════ -->
+    <Color x:Key="AccentPrimaryColor">#2478C8</Color>
+    <Color x:Key="AccentSubtleColor">#223344</Color>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!--           PLAYING STATE                    -->
+    <!-- ═══════════════════════════════════════════ -->
+    <Color x:Key="PlayingGreenColor">#00E676</Color>
+
+    <!-- Paused state -->
+    <Color x:Key="PausedAmberColor">#FFB300</Color>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!--           SEMANTIC COLORS                  -->
+    <!-- ═══════════════════════════════════════════ -->
+    <Color x:Key="SuccessColor">#2ECC71</Color>
+    <Color x:Key="WarningColor">#F39C12</Color>
+    <Color x:Key="DangerColor">#E74C3C</Color>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!--           BRUSHES                          -->
+    <!-- ═══════════════════════════════════════════ -->
+    <SolidColorBrush x:Key="BgDeepBrush" Color="{StaticResource BgDeepColor}"/>
+    <SolidColorBrush x:Key="BgBaseBrush" Color="{StaticResource BgBaseColor}"/>
+    <SolidColorBrush x:Key="BgPanelBrush" Color="{StaticResource BgPanelColor}"/>
+    <SolidColorBrush x:Key="BgCardBrush" Color="{StaticResource BgCardColor}"/>
+    <SolidColorBrush x:Key="BgElevatedBrush" Color="{StaticResource BgElevatedColor}"/>
+
+    <SolidColorBrush x:Key="BorderSubtleBrush" Color="{StaticResource BorderSubtleColor}"/>
+    <SolidColorBrush x:Key="BorderDefaultBrush" Color="{StaticResource BorderDefaultColor}"/>
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="{StaticResource BorderStrongColor}"/>
+
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
+
+    <SolidColorBrush x:Key="AccentPrimaryBrush" Color="{StaticResource AccentPrimaryColor}"/>
+    <SolidColorBrush x:Key="AccentSubtleBrush" Color="{StaticResource AccentSubtleColor}"/>
+
+    <SolidColorBrush x:Key="PlayingGreenBrush" Color="{StaticResource PlayingGreenColor}"/>
+    <SolidColorBrush x:Key="PausedAmberBrush" Color="{StaticResource PausedAmberColor}"/>
+
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
+
+    <!-- Overlay dark -->
+    <SolidColorBrush x:Key="OverlayBrush" Color="#B0000000"/>
+
+</ResourceDictionary>
