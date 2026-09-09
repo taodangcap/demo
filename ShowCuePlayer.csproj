@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>ShowCuePlayer</RootNamespace>
+    <AssemblyName>ShowCuePlayer</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Platform>x64</Platform>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.9</Version>
+    <Title>7zyx Media</Title>
+    <Product>7zyx Media</Product>
+    <Authors>7zyx Media</Authors>
+    <Description>Karaoke media control for external audio and lighting systems</Description>
+    <Optimize>true</Optimize>
+    <!-- Disable trimming warnings from WPF -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Audio Engine -->
+    <PackageReference Include="FontAwesome.Sharp" Version="6.6.0" />
+    <PackageReference Include="ManagedBass" Version="3.1.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <PackageReference Include="NAudio" Version="2.3.0" />
+
+    <!-- Metadata -->
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
+
+    <!-- DI + Hosting -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="7.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="7.0.0" />
+
+    <!-- MVVM -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+
+    <!-- Database -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="7.0.20" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
+
+    <!-- JSON is built-in to .NET 7 -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\**\*" Exclude="Assets\pwa-*.png" />
+    <Compile Remove="ShowCuePlayer.Tests\**\*.cs" />
+    <None Remove="ShowCuePlayer.Tests\**\*" />
+  </ItemGroup>
+
+  <!-- Copy native bass dlls to output -->
+  <ItemGroup>
+    <None Update="bass.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </None>
+  </ItemGroup>
+
+</Project>
