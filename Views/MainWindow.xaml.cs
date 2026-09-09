@@ -2130,22 +2130,70 @@ public partial class MainWindow : Window
         KaraokeDurationText.Text = "0:00";
     }
 
+    /// <summary>
+    /// Tự động nhận diện màn hình phụ thực tế:
+    /// Ưu tiên màn hình KHÁC với màn hình mà cửa sổ điều khiển chính (MainWindow) đang mở trên đó.
+    /// Giúp tránh triệt để lỗi Windows nhận nhầm Màn 2 là màn chính hoặc TV là Primary.
+    /// </summary>
+    private Models.VideoScreenInfo? ResolveSmartSecondaryScreen()
+    {
+        if (ViewModel is null || ViewModel.VideoScreens.Count == 0) return null;
+
+        try
+        {
+            var appScreen = System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle);
+            var secondary = ViewModel.VideoScreens.FirstOrDefault(s =>
+                s.Screen is not null && !string.Equals(s.DeviceName, appScreen.DeviceName, StringComparison.OrdinalIgnoreCase));
+            if (secondary is not null)
+                return secondary;
+        }
+        catch { /* ignore */ }
+
+        return ViewModel.VideoScreens.FirstOrDefault(s => !s.IsPrimary)
+            ?? ViewModel.VideoScreens.Skip(1).FirstOrDefault()
+            ?? ViewModel.VideoScreens.FirstOrDefault();
+    }
+
     private async void BtnProgramScreen1Window_Click(object sender, RoutedEventArgs e)
-        => await OpenProgramWindowedAsync();
+    {
+        if (ViewModel is null) return;
+        try
+        {
+            // Mở cửa sổ thu nhỏ ngay trên màn hình mà người vận hành đang mở app
+            var appScreen = System.Windows.Forms.Screen.FromHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle);
+            var target = ViewModel.VideoScreens.FirstOrDefault(s => s.Screen?.DeviceName == appScreen.DeviceName)
+                ?? ViewModel.VideoScreens.FirstOrDefault(s => s.IsPrimary)
+                ?? ViewModel.VideoScreens.FirstOrDefault();
+            await OpenProgramWindowedAsync(target);
+        }
+        catch
+        {
+            await OpenProgramWindowedAsync();
+        }
+    }
 
     private async void BtnProgramScreen2Fullscreen_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
-        var screen2 = ViewModel.VideoScreens
-            .OrderBy(screen => screen.Index)
-            .FirstOrDefault(screen => !screen.IsPrimary && screen.Screen is not null);
-        if (screen2 is null)
+
+        // 1. Ưu tiên màn hình mà người dùng đã chỉ định trong ComboBox "MÀN FULL"
+        var targetScreen = ViewModel.SelectedVideoScreen;
+
+        // 2. Nếu chưa chọn hoặc không hợp lệ, tự động nhận diện màn hình phụ thông minh (khác với màn app đang mở)
+        if (targetScreen?.Screen is null)
         {
-            ViewModel.StatusMessage = "Chưa kết nối Màn 2 · hãy cắm màn hình rồi chọn Detect trong Windows";
+            targetScreen = ResolveSmartSecondaryScreen();
+            if (targetScreen is not null)
+                ViewModel.SelectedVideoScreen = targetScreen;
+        }
+
+        if (targetScreen?.Screen is null)
+        {
+            ViewModel.StatusMessage = "Chưa tìm thấy màn hình ngoài · hãy cắm màn hình rồi bấm nút ↻ để quét lại";
             return;
         }
 
-        await OpenProgramFullscreenAsync(screen2.Screen, screen2, screen2.DisplayName);
+        await OpenProgramFullscreenAsync(targetScreen.Screen, targetScreen, targetScreen.DisplayName);
     }
 
     private void Settings_SettingsChanged(object? sender, EventArgs e)

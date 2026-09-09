@@ -255,7 +255,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             for (int i = 0; i < all.Length; i++)
                 VideoScreens.Add(new VideoScreenInfo(all[i], i + 1, all.Length));
 
-            HasSecondaryDisplay = VideoScreens.Any(screen => !screen.IsPrimary);
+            HasSecondaryDisplay = VideoScreens.Count > 1 || VideoScreens.Any(screen => !screen.IsPrimary);
 
             // Prefer saved device, else non-primary (projector), else primary.
             VideoScreenInfo? pick = null;
@@ -273,6 +273,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             _reloadingVideoScreens = false;
+            OnPropertyChanged(nameof(FullscreenButtonText));
         }
 
         // Initial/settings load: remember the target without opening or moving a live window.
@@ -325,8 +326,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    public string FullscreenButtonText => SelectedVideoScreen is not null
+        ? $"{SelectedVideoScreen.ShortName} · FULL"
+        : "MÀN PHỤ · FULL";
+
+    [RelayCommand]
+    public void RefreshVideoScreens()
+    {
+        LoadVideoScreens();
+        StatusMessage = $"Đã quét lại màn hình: {VideoScreens.Count} màn kết nối";
+    }
+
     partial void OnSelectedVideoScreenChanged(VideoScreenInfo? value)
     {
+        OnPropertyChanged(nameof(FullscreenButtonText));
         if (!_reloadingVideoScreens && value is not null)
         {
             if (_videoPlayer.IsPreviewOnlyOutput)

@@ -2174,10 +2174,29 @@
                                         Padding="0" Style="{StaticResource KaraokeCompactButtonStyle}"
                                         Click="RefreshKaraokeAudioOutputs_Click" ToolTip="Quét lại thiết bị âm thanh"/>
                             </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="76"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="38"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="MÀN FULL" Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="KaraokeVideoScreenCombo" Grid.Column="1" Height="30"
+                                          Style="{StaticResource DarkComboBoxStyle}"
+                                          ItemsSource="{Binding VideoScreens}"
+                                          SelectedItem="{Binding SelectedVideoScreen, Mode=TwoWay}"
+                                          DisplayMemberPath="DisplayName"
+                                          MaxDropDownHeight="240"
+                                          ToolTip="Chọn màn hình để chiếu Fullscreen (Màn 1, Màn 2 hoặc Tự động)"/>
+                                <Button Grid.Column="2" Content="↻" Width="32" Height="28" Margin="6,0,0,0"
+                                        Padding="0" Style="{StaticResource KaraokeCompactButtonStyle}"
+                                        Command="{Binding RefreshVideoScreensCommand}" ToolTip="Quét lại danh sách màn hình cắm ngoài"/>
+                            </Grid>
                             <Grid Margin="0,11,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="0.9*"/>
-                                    <ColumnDefinition Width="1.2*"/>
+                                    <ColumnDefinition Width="1*"/>
                                     <ColumnDefinition Width="1.35*"/>
                                 </Grid.ColumnDefinitions>
                                 <Button Grid.Column="0" Content="TẮT OUTPUT" Margin="0,0,4,0"
@@ -2185,14 +2204,14 @@
                                         IsEnabled="{Binding IsKaraokeOutputOn}"
                                         Click="BtnProgramOutputOff_Click"
                                         ToolTip="Tắt màn hình Output ngoài, vẫn giữ Program và phiên Karaoke"/>
-                                <Button Grid.Column="1" Content="M1 · WINDOW" Margin="0,0,4,0"
+                                <Button Grid.Column="1" Content="CỬA SỔ" Margin="0,0,4,0"
                                         Style="{StaticResource KaraokeCompactButtonStyle}"
-                                        Click="BtnProgramScreen1Window_Click" ToolTip="Mở Program dạng cửa sổ trên Màn 1"/>
-                                <Button Grid.Column="2" Content="M2 · FULL"
+                                        Click="BtnProgramScreen1Window_Click" ToolTip="Mở Program dạng cửa sổ thu nhỏ trên màn điều khiển"/>
+                                <Button Grid.Column="2" Content="{Binding FullscreenButtonText, FallbackValue='M2 · FULL'}"
                                         Style="{StaticResource KaraokePrimaryButtonStyle}"
                                         IsEnabled="{Binding HasSecondaryDisplay}"
                                         ToolTipService.ShowOnDisabled="True"
-                                        Click="BtnProgramScreen2Fullscreen_Click" ToolTip="Mở Program toàn màn hình trên Màn 2 (cần màn hình phụ thật)"/>
+                                        Click="BtnProgramScreen2Fullscreen_Click" ToolTip="Mở Program toàn màn hình lên màn hình đã chọn ở trên (tự động nhận diện màn phụ)"/>
                             </Grid>
                         </StackPanel>
                     </Grid>

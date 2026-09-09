@@ -31,14 +31,11 @@ public sealed class VideoScreenInfo
         if (totalScreens <= 1)
             role = "Màn duy nhất";
         else if (screen.Primary)
-            role = "Điều khiển";
+            role = "Chính";
         else
-            role = "Output";
+            role = "Phụ";
 
-        ShortName = screen.Primary
-            ? $"M{index} · CONTROL"
-            : $"M{index} · OUTPUT";
-
+        ShortName = $"M{index}";
         DisplayName = $"Màn {index} ({role}) · {Width}×{Height}";
     }
 
