@@ -115,7 +115,12 @@ public sealed class ImportService : IImportService
             }
             else if (Directory.Exists(path))
             {
-                var found = Directory.EnumerateFiles(path, "*.*", SearchOption.AllDirectories)
+                var options = new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    IgnoreInaccessible = true
+                };
+                var found = Directory.EnumerateFiles(path, "*.*", options)
                     .Where(p => IsMatchingType(p, targetType));
                 files.AddRange(found);
             }

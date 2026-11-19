@@ -285,8 +285,8 @@
                             Margin="20,0" VerticalAlignment="Center">
                     <Button Content="Hủy" Style="{StaticResource FlatButtonStyle}"
                             Click="BtnCancel_Click" Margin="0,0,8,0" Padding="16,8"/>
-                    <Button Content="Lưu cài đặt" Style="{StaticResource AccentButtonStyle}"
-                            Command="{Binding SaveCommand}" Click="BtnSave_Click" Padding="16,8"/>
+                    <Button x:Name="BtnSave" Content="Lưu cài đặt" Style="{StaticResource AccentButtonStyle}"
+                            Click="BtnSave_Click" Padding="16,8"/>
                 </StackPanel>
             </Border>
 

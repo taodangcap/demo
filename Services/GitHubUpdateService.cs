@@ -167,45 +167,51 @@ public sealed class GitHubUpdateService : IGitHubUpdateService, IDisposable
             ? update.Size
             : response.Content.Headers.ContentLength.GetValueOrDefault();
 
-        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[1024 * 128];
-        long downloaded = 0;
-        await using (var output = new FileStream(partialPath, FileMode.Create, FileAccess.Write,
-            FileShare.None, 1024 * 128, FileOptions.Asynchronous | FileOptions.SequentialScan))
+        try
         {
-            while (true)
+            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[1024 * 128];
+            long downloaded = 0;
+            await using (var output = new FileStream(partialPath, FileMode.Create, FileAccess.Write,
+                FileShare.None, 1024 * 128, FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
-                var read = await input.ReadAsync(buffer, cancellationToken);
-                if (read == 0) break;
-                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                sha256.AppendData(buffer, 0, read);
-                downloaded += read;
-                if (expectedSize > 0)
-                    progress?.Report(Math.Clamp(downloaded / (double)expectedSize, 0, 1));
+                while (true)
+                {
+                    var read = await input.ReadAsync(buffer, cancellationToken);
+                    if (read == 0) break;
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                    sha256.AppendData(buffer, 0, read);
+                    downloaded += read;
+                    if (expectedSize > 0)
+                        progress?.Report(Math.Clamp(downloaded / (double)expectedSize, 0, 1));
+                }
+                await output.FlushAsync(cancellationToken);
             }
-            await output.FlushAsync(cancellationToken);
-        }
 
-        if (expectedSize > 0 && downloaded != expectedSize)
+            if (expectedSize > 0 && downloaded != expectedSize)
+            {
+                throw new InvalidDataException(
+                    $"File cập nhật tải thiếu dữ liệu ({downloaded}/{expectedSize} byte).");
+            }
+
+            var actualDigest = Convert.ToHexString(sha256.GetHashAndReset());
+            if (!string.IsNullOrWhiteSpace(update.Sha256Digest)
+                && !string.Equals(actualDigest, update.Sha256Digest,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("SHA-256 của bộ cài không khớp GitHub Release.");
+            }
+
+            File.Move(partialPath, finalPath, overwrite: true);
+            progress?.Report(1);
+            return finalPath;
+        }
+        catch
         {
-            File.Delete(partialPath);
-            throw new InvalidDataException(
-                $"File cập nhật tải thiếu dữ liệu ({downloaded}/{expectedSize} byte).");
+            try { if (File.Exists(partialPath)) File.Delete(partialPath); } catch { /* ignore */ }
+            throw;
         }
-
-        var actualDigest = Convert.ToHexString(sha256.GetHashAndReset());
-        if (!string.IsNullOrWhiteSpace(update.Sha256Digest)
-            && !string.Equals(actualDigest, update.Sha256Digest,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            File.Delete(partialPath);
-            throw new InvalidDataException("SHA-256 của bộ cài không khớp GitHub Release.");
-        }
-
-        File.Move(partialPath, finalPath, overwrite: true);
-        progress?.Report(1);
-        return finalPath;
     }
 
     public void LaunchInstaller(string installerPath)

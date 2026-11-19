@@ -11,6 +11,7 @@ public static class SleepPreventer
     private const uint ES_SYSTEM_REQUIRED = 0x00000001;
     private const uint ES_DISPLAY_REQUIRED = 0x00000002;
 
+    private static readonly object Gate = new();
     private static int _holdCount;
 
     [DllImport("kernel32.dll")]
@@ -19,17 +20,38 @@ public static class SleepPreventer
     /// <summary>Hold awake (ref-counted). Call Release when done.</summary>
     public static void Hold()
     {
-        if (Interlocked.Increment(ref _holdCount) == 1)
-            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+        RunOnConsistentThread(() =>
+        {
+            lock (Gate)
+            {
+                if (++_holdCount == 1)
+                    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+            }
+        });
     }
 
     public static void Release()
     {
-        if (Interlocked.Decrement(ref _holdCount) <= 0)
+        RunOnConsistentThread(() =>
         {
-            Interlocked.Exchange(ref _holdCount, 0);
-            SetThreadExecutionState(ES_CONTINUOUS);
-        }
+            lock (Gate)
+            {
+                if (--_holdCount <= 0)
+                {
+                    _holdCount = 0;
+                    SetThreadExecutionState(ES_CONTINUOUS);
+                }
+            }
+        });
+    }
+
+    private static void RunOnConsistentThread(Action action)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess() || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+            action();
+        else
+            dispatcher.BeginInvoke(action);
     }
 
     public static void SetActive(bool active)

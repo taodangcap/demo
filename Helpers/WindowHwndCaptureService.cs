@@ -24,6 +24,7 @@ public sealed class WindowHwndCaptureService : IDisposable
     private int _generation;
     private int _intervalMs = 33;
     private int _maxWidth = 960;
+    private byte[]? _pixelBuffer;
 
     public int IntervalMs
     {
@@ -168,13 +169,13 @@ public sealed class WindowHwndCaptureService : IDisposable
                 // GetDIBits requires the bitmap to be deselected from its memory DC.
                 SelectObject(hdcScaled, oldScaled);
                 oldScaled = IntPtr.Zero;
-                var pixels = CopyBitmapBits(hBmpScaled, dstW, dstH);
-                if (pixels is null) return;
+                var buffer = EnsurePixelBuffer(dstW * dstH * 4);
+                if (!CopyBitmapBits(hBmpScaled, dstW, dstH, buffer)) return;
 
                 var bmpSource = BitmapSource.Create(
                     dstW, dstH, 96, 96,
                     PixelFormats.Bgr32, null,
-                    pixels,
+                    buffer,
                     dstW * 4);
                 bmpSource.Freeze();
 
@@ -216,7 +217,14 @@ public sealed class WindowHwndCaptureService : IDisposable
         }
     }
 
-    private static byte[]? CopyBitmapBits(IntPtr hBitmap, int width, int height)
+    private byte[] EnsurePixelBuffer(int requiredLength)
+    {
+        if (_pixelBuffer is null || _pixelBuffer.Length != requiredLength)
+            _pixelBuffer = new byte[requiredLength];
+        return _pixelBuffer;
+    }
+
+    private static bool CopyBitmapBits(IntPtr hBitmap, int width, int height, byte[] buffer)
     {
         var bmi = new BITMAPINFO
         {
@@ -231,19 +239,16 @@ public sealed class WindowHwndCaptureService : IDisposable
             }
         };
 
-        var buffer = new byte[width * height * 4];
         IntPtr screen = GetDC(IntPtr.Zero);
         try
         {
             int scanLines = GetDIBits(screen, hBitmap, 0, (uint)height, buffer, ref bmi, DIB_RGB_COLORS);
-            if (scanLines != height)
-                return null;
+            return scanLines == height;
         }
         finally
         {
             if (screen != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screen);
         }
-        return buffer;
     }
 
     public void Dispose()

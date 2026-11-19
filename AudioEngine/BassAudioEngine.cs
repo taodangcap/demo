@@ -13,8 +13,11 @@ public sealed class BassAudioEngine : IAudioEngine
 {
     private readonly ILogger<BassAudioEngine> _logger;
     private readonly ConcurrentDictionary<int, AudioChannel> _channels = new ConcurrentDictionary<int, AudioChannel>();
+    // Keep a single rooted delegate instance so GC cannot collect it while native bass.dll holds the pointer.
+    private readonly SyncProcedure _channelEndProc;
     private bool _initialized;
     private int _currentDevice = -1;
+    private int _bufferMs = 100;
     private bool _disposed;
     private readonly object _lifecycleGate = new();
 
@@ -25,6 +28,18 @@ public sealed class BassAudioEngine : IAudioEngine
     public BassAudioEngine(ILogger<BassAudioEngine> logger)
     {
         _logger = logger;
+        _channelEndProc = OnChannelEnd;
+    }
+
+    public void ConfigureBuffer(int bufferMs)
+    {
+        lock (_lifecycleGate)
+        {
+            // ManagedBass expects PlaybackBufferLength >= ~30 ms on Windows output devices; match AppSettings upper bound 5000 ms.
+            _bufferMs = Math.Clamp(bufferMs, 30, 5000);
+            if (_initialized)
+                Bass.PlaybackBufferLength = _bufferMs;
+        }
     }
 
     public bool Initialize(int deviceIndex = -1)
@@ -43,46 +58,18 @@ public sealed class BassAudioEngine : IAudioEngine
             if (_initialized) return true;
 
             Bass.UpdatePeriod = 5;
-            Bass.PlaybackBufferLength = 100;
+            Bass.PlaybackBufferLength = _bufferMs;
 
             if (deviceIndex == -1)
             {
                 deviceIndex = GetBestDefaultDeviceIndex();
             }
 
-            // Log all available devices
-            try
-            {
-                var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] --- Enumerating Audio Devices ---\n");
-                int deviceCount = Bass.DeviceCount;
-                System.IO.File.AppendAllText(logPath, $"Device Count: {deviceCount}\n");
-                for (int i = 0; i < deviceCount; i++)
-                {
-                    if (Bass.GetDeviceInfo(i, out var info))
-                    {
-                        System.IO.File.AppendAllText(logPath, $"Device {i}: Name={info.Name}, Driver={info.Driver}, IsEnabled={info.IsEnabled}, IsDefault={info.IsDefault}, IsInitialized={info.IsInitialized}, Type={info.Type}\n");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                try
-                {
-                    var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                    System.IO.File.AppendAllText(logPath, $"Failed to enumerate devices: {ex.Message}\n");
-                }
-                catch {}
-            }
+            LogAvailableDevices();
 
             bool ok = Bass.Init(deviceIndex, 44100, DeviceInitFlags.Default);
             var initErr = Bass.LastError;
-            try
-            {
-                var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] Initialize called: device={deviceIndex}, ok={ok}, LastError={initErr}\n");
-            }
-            catch {}
+            _logger.LogDebug("BASS Initialize: device={Device}, ok={Ok}, LastError={Error}", deviceIndex, ok, initErr);
 
             if (!ok && initErr != Errors.Already)
             {
@@ -92,13 +79,7 @@ public sealed class BassAudioEngine : IAudioEngine
                 {
                     if (Bass.GetDeviceInfo(i, out var info) && info.IsEnabled)
                     {
-                        try
-                        {
-                            var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                            System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] Fallback: Trying device {i} ({info.Name})\n");
-                        }
-                        catch {}
-                        
+                        _logger.LogDebug("BASS fallback trying device {Index} ({Name})", i, info.Name);
                         if (Bass.Init(i, 44100, DeviceInitFlags.Default))
                         {
                             ok = true;
@@ -113,13 +94,7 @@ public sealed class BassAudioEngine : IAudioEngine
             if (!ok && initErr != Errors.Already)
             {
                 // Fallback 2: Try device 0 (No Sound device) so the app doesn't fail completely
-                try
-                {
-                    var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                    System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] Fallback: Trying device 0 (No Sound)\n");
-                }
-                catch {}
-                
+                _logger.LogDebug("BASS fallback trying device 0 (No Sound)");
                 if (Bass.Init(0, 44100, DeviceInitFlags.Default))
                 {
                     ok = true;
@@ -130,107 +105,76 @@ public sealed class BassAudioEngine : IAudioEngine
 
             if (!ok && initErr != Errors.Already)
             {
-                try
-                {
-                    var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                    System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] BASS init failed completely: {initErr}\n");
-                }
-                catch {}
                 _logger.LogError("BASS init failed: {Error}", initErr);
                 return false;
             }
 
-            _currentDevice = deviceIndex;
+            _currentDevice = initErr == Errors.Already ? Bass.CurrentDevice : deviceIndex;
             _initialized = true;
-            try
-            {
-                var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] BASS initialized successfully on device {deviceIndex} (actual device {_currentDevice}).\n");
-            }
-            catch {}
-            _logger.LogInformation("BASS initialized. Device={Device}", deviceIndex);
+            _logger.LogInformation("BASS initialized. Device={Device}", _currentDevice);
             return true;
         }
         catch (Exception ex)
         {
-            try
-            {
-                var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] Initialize exception: {ex.Message}\n{ex.StackTrace}\n");
-            }
-            catch {}
             _logger.LogError(ex, "Exception initializing BASS");
             return false;
         }
     }
 
-    public async Task<int> LoadAsync(string filePath)
+    private void LogAvailableDevices()
     {
+        if (!_logger.IsEnabled(LogLevel.Debug)) return;
         try
         {
-            var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-            System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] LoadAsync: filePath={filePath}, Exists={File.Exists(filePath)}, Initialized={_initialized}\n");
+            int deviceCount = Bass.DeviceCount;
+            _logger.LogDebug("BASS Device Count: {Count}", deviceCount);
+            for (int i = 0; i < deviceCount; i++)
+            {
+                if (Bass.GetDeviceInfo(i, out var info))
+                {
+                    _logger.LogDebug("Device {Index}: Name={Name}, IsEnabled={Enabled}, IsDefault={Default}, Type={Type}",
+                        i, info.Name, info.IsEnabled, info.IsDefault, info.Type);
+                }
+            }
         }
-        catch {}
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to enumerate BASS audio devices");
+        }
+    }
 
-        if (!_initialized || !File.Exists(filePath)) return -1;
+    public async Task<int> LoadAsync(string filePath)
+    {
+        if (!_initialized || string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return -1;
 
         return await Task.Run(() =>
         {
             try
             {
-                if (_currentDevice >= 0)
-                {
-                    try
-                    {
-                        Bass.CurrentDevice = _currentDevice;
-                    }
-                    catch (Exception ex)
-                    {
-                        try
-                        {
-                            var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                            System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] Warning: set_CurrentDevice to {_currentDevice} failed: {ex.Message}\n");
-                        }
-                        catch {}
-                    }
-                }
+                int handle;
+                Errors loadErr;
                 var flags = BassFlags.Prescan | BassFlags.Float;
-                int handle = Bass.CreateStream(filePath, 0, 0, flags);
-                var loadErr = Bass.LastError;
 
-                if (handle == 0 && loadErr == Errors.Init)
+                lock (_lifecycleGate)
                 {
-                    try
-                    {
-                        var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                        System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] CreateStream failed with Init. Triggering BASS re-initialization...\n");
-                    }
-                    catch {}
+                    if (_disposed || !_initialized) return -1;
+                    SetActiveBassDevice(_currentDevice);
+                    handle = Bass.CreateStream(filePath, 0, 0, flags);
+                    loadErr = Bass.LastError;
 
-                    _initialized = false;
-                    Bass.Free();
-                    if (InitializeCore(_currentDevice))
+                    if (handle == 0 && loadErr == Errors.Init)
                     {
-                        if (_currentDevice >= 0)
+                        _logger.LogWarning("BASS CreateStream returned Errors.Init; re-initializing device {Device}", _currentDevice);
+                        _initialized = false;
+                        Bass.Free();
+                        if (InitializeCore(_currentDevice))
                         {
-                            try
-                            {
-                                Bass.CurrentDevice = _currentDevice;
-                            }
-                            catch {}
+                            SetActiveBassDevice(_currentDevice);
+                            handle = Bass.CreateStream(filePath, 0, 0, flags);
+                            loadErr = Bass.LastError;
                         }
-                        handle = Bass.CreateStream(filePath, 0, 0, flags);
-                        loadErr = Bass.LastError;
                     }
                 }
-                
-                try
-                {
-                    var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                    System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] CreateStream handle={handle}, LastError={loadErr}\n");
-                }
-                catch {}
 
                 if (handle == 0)
                 {
@@ -238,8 +182,8 @@ public sealed class BassAudioEngine : IAudioEngine
                     return -1;
                 }
 
-                // Register end-of-stream sync
-                Bass.ChannelSetSync(handle, SyncFlags.End, 0, OnChannelEnd, handle);
+                // Register end-of-stream sync using the rooted delegate instance
+                Bass.ChannelSetSync(handle, SyncFlags.End, 0, _channelEndProc, handle);
 
                 var channel = new AudioChannel(handle, filePath);
                 _channels[handle] = channel;
@@ -249,16 +193,23 @@ public sealed class BassAudioEngine : IAudioEngine
             }
             catch (Exception ex)
             {
-                try
-                {
-                    var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-                    System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] CreateStream exception: {ex.Message}\n{ex.StackTrace}\n");
-                }
-                catch {}
                 _logger.LogError(ex, "Exception loading {File}", filePath);
                 return -1;
             }
         });
+    }
+
+    private void SetActiveBassDevice(int deviceIndex)
+    {
+        if (deviceIndex < 0) return;
+        try
+        {
+            Bass.CurrentDevice = deviceIndex;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "set_CurrentDevice to {Device} failed", deviceIndex);
+        }
     }
 
     private void OnChannelEnd(int handle, int channel, int data, nint user)
@@ -304,26 +255,14 @@ public sealed class BassAudioEngine : IAudioEngine
     }
 
     private void LogDebug(string message)
-    {
-        try
-        {
-            var logPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "audio_debug.log");
-            System.IO.File.AppendAllText(logPath, $"[{System.DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n");
-        }
-        catch {}
-        _logger.LogDebug(message);
-    }
+        => _logger.LogDebug("{Message}", message);
 
     public void Seek(int handle, double positionSeconds)
     {
-        if (!_channels.ContainsKey(handle))
-        {
-            LogDebug($"Seek: channel not found for handle {handle}");
-            return;
-        }
-        long bytes = Bass.ChannelSeconds2Bytes(handle, positionSeconds);
-        bool ok = Bass.ChannelSetPosition(handle, bytes);
-        LogDebug($"Seek handle={handle} to {positionSeconds}s (bytes {bytes}): ok={ok}, LastError={Bass.LastError}");
+        if (!_channels.ContainsKey(handle)) return;
+        long bytes = Bass.ChannelSeconds2Bytes(handle, Math.Max(0, positionSeconds));
+        if (!Bass.ChannelSetPosition(handle, bytes))
+            _logger.LogDebug("Seek handle={Handle} to {Pos}s failed: {Error}", handle, positionSeconds, Bass.LastError);
     }
 
     public double GetPosition(int handle)
@@ -342,15 +281,11 @@ public sealed class BassAudioEngine : IAudioEngine
 
     public void SetVolume(int handle, double volume)
     {
-        if (!_channels.ContainsKey(handle))
-        {
-            LogDebug($"SetVolume: channel not found for handle {handle}");
-            return;
-        }
+        if (!_channels.ContainsKey(handle)) return;
         if (!double.IsFinite(volume)) volume = 0;
         float vol = (float)Math.Clamp(volume, 0, 1);
-        bool ok = Bass.ChannelSetAttribute(handle, ChannelAttribute.Volume, vol);
-        LogDebug($"SetVolume handle={handle} to {vol}: ok={ok}, LastError={Bass.LastError}");
+        if (!Bass.ChannelSetAttribute(handle, ChannelAttribute.Volume, vol))
+            _logger.LogDebug("SetVolume handle={Handle} failed: {Error}", handle, Bass.LastError);
     }
 
     public double GetVolume(int handle)
@@ -425,14 +360,20 @@ public sealed class BassAudioEngine : IAudioEngine
     {
         try
         {
+            if (_disposed) return false;
             if (_initialized && _currentDevice == deviceIndex)
-            {
                 return true;
-            }
+
+            var previousDevice = _currentDevice;
             StopAll();
             Bass.Free();
             _initialized = false;
-            return InitializeCore(deviceIndex);
+            if (InitializeCore(deviceIndex))
+                return true;
+
+            if (previousDevice != deviceIndex)
+                InitializeCore(previousDevice);
+            return false;
         }
         catch (Exception ex)
         {

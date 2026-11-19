@@ -22,9 +22,28 @@ public partial class SettingsView : Window
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
     private void BtnCancel_Click(object sender, RoutedEventArgs e) => Close();
 
-    private void BtnSave_Click(object sender, RoutedEventArgs e)
+    private async void BtnSave_Click(object sender, RoutedEventArgs e)
     {
-        Dispatcher.InvokeAsync(Close);
+        if (Vm is null)
+        {
+            Close();
+            return;
+        }
+        BtnSave.IsEnabled = false;
+        try
+        {
+            await Vm.SaveCommand.ExecuteAsync(null);
+            Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Không thể lưu cài đặt: {ex.Message}",
+                "Lỗi lưu cài đặt", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            BtnSave.IsEnabled = true;
+        }
     }
 
     /// <summary>OBS-style: when a hotkey row is capturing, bind key here.</summary>

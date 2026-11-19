@@ -58,11 +58,30 @@ public static class HotkeyUtil
                 key = Key.Up;
             else if (part.Equals("Down", StringComparison.OrdinalIgnoreCase))
                 key = Key.Down;
-            else if (Enum.TryParse(part, true, out Key parsed))
+            else if (Enum.TryParse(part, true, out Key parsed) && parsed != Key.None)
+            {
+                if (key != Key.None)
+                {
+                    key = Key.None;
+                    modifiers = ModifierKeys.None;
+                    return false;
+                }
                 key = parsed;
+            }
+            else
+            {
+                key = Key.None;
+                modifiers = ModifierKeys.None;
+                return false;
+            }
         }
 
-        return key != Key.None;
+        if (key == Key.None)
+        {
+            modifiers = ModifierKeys.None;
+            return false;
+        }
+        return true;
     }
 
     public static bool Matches(string? binding, Key key, ModifierKeys modifiers)

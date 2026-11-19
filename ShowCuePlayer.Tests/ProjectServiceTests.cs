@@ -50,4 +50,22 @@ public sealed class ProjectServiceTests
                 File.Delete(filePath);
         }
     }
+
+    [TestMethod]
+    public async Task OpenAsync_CorruptJson_ReturnsNullSafely()
+    {
+        var filePath = Path.Combine(Path.GetTempPath(), $"corrupt-{Guid.NewGuid():N}.7zyx");
+        try
+        {
+            await File.WriteAllTextAsync(filePath, "{ invalid json !!");
+            using var reader = new ProjectService();
+            var loaded = await reader.OpenAsync(filePath);
+            Assert.IsNull(loaded);
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+                File.Delete(filePath);
+        }
+    }
 }

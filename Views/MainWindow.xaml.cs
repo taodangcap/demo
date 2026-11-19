@@ -23,11 +23,9 @@ public partial class MainWindow : Window
     public MainViewModel? ViewModel => DataContext as MainViewModel;
     public ObservableCollection<Models.AudioOutputEndpoint> KaraokeAudioOutputDevices { get; } = new();
     private Views.VideoWindow? _karaokeSecondaryWindow;
-    private Views.VideoWindow? _previewSourceWindow;
     /// <summary>Mirror panel Preview (view) từ HWND OUTPUT — mượt hơn WebView CapturePreview.</summary>
     private readonly WindowHwndCaptureService _windowMirror = new();
-    private CancellationTokenSource? _karaokeCaptureCts;
-    private CancellationTokenSource? _mixerProgramCaptureCts;
+    private CancellationTokenSource? _karaokeOnlyCaptureCts;
     private readonly SemaphoreSlim _karaokeOutputGate = new(1, 1);
     private readonly Dictionary<string, int> _soundEffectHandles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Models.KaraokeSoundEffect> _soundEffectPlaybackModels = new(StringComparer.OrdinalIgnoreCase);
@@ -36,7 +34,6 @@ public partial class MainWindow : Window
     private readonly System.Windows.Threading.DispatcherTimer _soundEffectTimer;
     private readonly IGitHubUpdateService _updateService;
     private CancellationTokenSource? _updateCts;
-    private CancellationTokenSource? _soundEffectVolumeSaveCts;
     private AppUpdateInfo? _availableUpdate;
     private bool _updateBusy;
     private Models.KaraokeSoundEffect? _selectedSoundEffect;
@@ -80,11 +77,6 @@ public partial class MainWindow : Window
         };
         _soundEffectTimer.Tick += (_, _) => UpdateSoundEffectTransport();
         _soundEffectTimer.Start();
-        MixerPreviewVideo.MediaEnded += (_, _) =>
-        {
-            MixerPreviewVideo.Position = TimeSpan.Zero;
-            MixerPreviewVideo.Play();
-        };
 
         if (ViewModel != null)
         {
@@ -97,10 +89,15 @@ public partial class MainWindow : Window
             ViewModel.MixerKaraokeTakeRequested += OnMixerKaraokeTakeRequested;
             ViewModel.SoundEffectHotkeyPressed += OnSoundEffectHotkeyPressed;
             ViewModel.PropertyChanged += ViewModel_PropertyChanged;
-            ViewModel.FilteredCues.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(UpdateCueCardSizing);
             ViewModel.Settings.SettingsChanged += Settings_SettingsChanged;
             ViewModel.AudioEngine.ChannelEnded += SoundEffectAudio_ChannelEnded;
         }
+
+        KaraokeOnlyProgramDwmHost.ThumbnailFailed += (_, _) =>
+        {
+            if (ViewModel?.IsKaraokeOutputOn == true && _karaokeOnlyCaptureCts is null)
+                Dispatcher.BeginInvoke(RefreshKaraokeOnlyProgramPreview);
+        };
 
         this.Loaded += MainWindow_Loaded;
         this.Closed += MainWindow_Closed;
@@ -108,31 +105,25 @@ public partial class MainWindow : Window
 
     private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(MainViewModel.IsLivePreviewVisible)
-            or nameof(MainViewModel.SelectedPlaylist))
+        if (e.PropertyName == nameof(MainViewModel.IsLivePreviewVisible))
         {
-            ApplyResponsiveLayout();
             // Tắt preview → dừng capture (trả GPU cho màn OUTPUT karaoke)
-            if (e.PropertyName == nameof(MainViewModel.IsLivePreviewVisible))
-                Dispatcher.BeginInvoke(RefreshActiveOutputPreview);
+            Dispatcher.BeginInvoke(RefreshKaraokeOnlyProgramPreview);
         }
 
         if (e.PropertyName is nameof(MainViewModel.IsOutputPlaying)
             or nameof(MainViewModel.IsVideoOutputEnabled)
             or nameof(MainViewModel.IsKaraokeOutputOn))
-            Dispatcher.BeginInvoke(RefreshActiveOutputPreview);
-
-        if (e.PropertyName is nameof(MainViewModel.MixerPreviewInput)
-            or nameof(MainViewModel.IsMixerKaraokePreview))
-            Dispatcher.BeginInvoke(UpdateMixerPreview);
-
-        if (e.PropertyName == nameof(MainViewModel.ActiveWorkspace))
         {
-            Dispatcher.BeginInvoke(ApplyResponsiveLayout);
-            Dispatcher.BeginInvoke(UpdateMixerPreview);
-            Dispatcher.BeginInvoke(RefreshActiveOutputPreview);
+            if (e.PropertyName == nameof(MainViewModel.IsKaraokeOutputOn)
+                && ViewModel?.IsKaraokeOutputOn == false
+                && _karaokeSecondaryWindow is not null)
+            {
+                _karaokeSecondaryWindow = null;
+                ResetKaraokeProgress();
+            }
+            Dispatcher.BeginInvoke(RefreshKaraokeOnlyProgramPreview);
         }
-
 
         if (e.PropertyName == nameof(MainViewModel.MasterVolume))
         {
@@ -144,14 +135,9 @@ public partial class MainWindow : Window
 
     private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        ApplyResponsiveLayout();
         UpdateKaraokeProgramAspectRatio();
         if (KaraokeOnlyProgramDwmHost.Visibility == Visibility.Visible)
             KaraokeOnlyProgramDwmHost.UpdateThumbnailProperties();
-        if (MixerProgramDwmHost.Visibility == Visibility.Visible)
-            MixerProgramDwmHost.UpdateThumbnailProperties();
-        else if (KaraokeDwmHost.Visibility == Visibility.Visible)
-            KaraokeDwmHost.UpdateThumbnailProperties();
     }
 
     private void KaraokeOnlyProgramFrame_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -168,247 +154,14 @@ public partial class MainWindow : Window
             KaraokeOnlyProgramFrame.Height = targetHeight;
     }
 
-    private void SearchSuggestion_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: string suggestion } || ViewModel is null) return;
-        ViewModel.SearchText = suggestion;
-        ViewModel.ShowSearchSuggestions = false;
-        SearchBox.Focus();
-        SearchBox.CaretIndex = SearchBox.Text.Length;
-    }
-
-    private void MixerProgramSeekSlider_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-        => ViewModel?.MixerBeginProgramSeekCommand.Execute(null);
-
-    private async void MixerProgramSeekSlider_PreviewMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not Slider slider || ViewModel is null) return;
-        if (!await ViewModel.SeekMixerProgramAsync(slider.Value))
-            slider.Value = ViewModel.MixerProgramInput?.Position ?? 0;
-    }
-
-    private void MixerProgramSeekSlider_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
-        => ViewModel?.CancelMixerProgramSeek();
-
-    private void MixerProgramVolumeSlider_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-        => ViewModel?.BeginMixerProgramVolumeEdit();
-
-    private async void MixerProgramVolumeSlider_PreviewMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not Slider slider || ViewModel is null) return;
-        if (!await ViewModel.SetMixerProgramVolumeAsync(slider.Value))
-            slider.Value = ViewModel.MixerProgramInput?.Volume ?? 0;
-    }
-
-    private void MixerProgramVolumeSlider_LostMouseCapture(object sender, System.Windows.Input.MouseEventArgs e)
-        => ViewModel?.CancelMixerProgramVolumeEdit();
-
-    private void ContentGrid_SizeChanged(object sender, SizeChangedEventArgs e)
-        => ApplyResponsiveLayout();
-
-    /// <summary>
-    /// Co giãn layout khi kéo dãn cửa sổ: preview, search, toolbar karaoke.
-    /// </summary>
-    private void ApplyResponsiveLayout()
-    {
-        if (!IsLoaded) return;
-
-        double w = Math.Max(0, ActualWidth);
-        double h = Math.Max(0, ActualHeight);
-        bool showPreview = ViewModel?.IsLivePreviewVisible == true;
-        bool isKaraoke = ViewModel?.SelectedPlaylist?.IsKaraoke == true;
-        UpdateCueCardSizing();
-
-        // ── Cột preview ──────────────────────────────────────────────
-        if (showPreview)
-        {
-            // Hẹp: preview nhỏ hơn; rộng: tối đa 420
-            double previewW = w switch
-            {
-                < 720 => Math.Clamp(w * 0.34, 140, 180),
-                < 900 => Math.Clamp(w * 0.30, 160, 220),
-                < 1100 => Math.Clamp(w * 0.26, 180, 280),
-                < 1400 => Math.Clamp(w * 0.24, 200, 360),
-                _ => Math.Clamp(w * 0.22, 240, 420)
-            };
-
-            ColSplitter.Width = new GridLength(6);
-            ColPreview.MinWidth = w < 800 ? 140 : 160;
-            ColPreview.MaxWidth = w < 900 ? 260 : 520;
-            // Chỉ set Width nếu user chưa kéo splitter lệch quá xa (tránh giật khi resize)
-            if (ColPreview.Width.IsAbsolute && Math.Abs(ColPreview.Width.Value - previewW) > 40
-                || ColPreview.Width.IsStar || ColPreview.Width.IsAuto
-                || ColPreview.Width.Value < 50)
-            {
-                ColPreview.Width = new GridLength(previewW);
-            }
-        }
-        else
-        {
-            ColSplitter.Width = new GridLength(0);
-            ColPreview.MinWidth = 0;
-            ColPreview.MaxWidth = 0;
-            ColPreview.Width = new GridLength(0);
-        }
-
-        // ── Ô search header ──────────────────────────────────────────
-        if (SearchBoxHost != null)
-        {
-            SearchBoxHost.Width = w switch
-            {
-                < 800 => 100,
-                < 1000 => 120,
-                < 1300 => 150,
-                _ => 180
-            };
-        }
-
-        // ── Toolbar karaoke: WrapPanel tự xuống dòng; chỉnh size theo bề ngang ─
-        if (isKaraoke)
-        {
-            double karaokeW = showPreview
-                ? Math.Max(200, w - (ColPreview.ActualWidth > 0 ? ColPreview.ActualWidth : 200) - 24)
-                : Math.Max(200, w - 16);
-
-            bool tiny = karaokeW < 640;
-            bool compact = karaokeW < 820;
-
-            if (TxtKaraokeStatus != null)
-            {
-                TxtKaraokeStatus.MaxWidth = Math.Max(120, karaokeW - 36);
-                TxtKaraokeStatus.FontSize = tiny ? 10 : 11;
-            }
-
-            if (TxtKaraokeSession != null)
-                TxtKaraokeSession.Width = tiny ? 64 : (compact ? 76 : 88);
-
-            // Không ghi đè Content (đang Binding VM) — chỉ co size / ẩn phụ
-            if (BtnKaraokeToggleSecondary != null)
-                BtnKaraokeToggleSecondary.MinWidth = tiny ? 72 : 100;
-
-
-            if (BtnKaraokeAutoNext != null)
-                BtnKaraokeAutoNext.Visibility = tiny ? Visibility.Collapsed : Visibility.Visible;
-            if (BtnKaraokeNew != null)
-                BtnKaraokeNew.Visibility = compact && tiny ? Visibility.Collapsed : Visibility.Visible;
-
-            if (LblOperator != null)
-                LblOperator.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-            if (LblOutput != null)
-                LblOutput.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        }
-
-        // ── Preview frame 16:9 ───────────────────────────────────────
-        if (PreviewFrameBorder != null && PreviewSidePanel != null && showPreview)
-        {
-            double panelInner = Math.Max(100, PreviewSidePanel.ActualWidth - 20);
-            if (panelInner > 40)
-            {
-                double h16x9 = panelInner * 9.0 / 16.0;
-                double panelH = PreviewSidePanel.ActualHeight > 0
-                    ? PreviewSidePanel.ActualHeight
-                    : h * 0.5;
-                // Preview không quá 48% chiều cao panel; tối thiểu 90px
-                double maxH = Math.Max(90, panelH * 0.48);
-                double minH = w < 800 ? 90 : 100;
-                PreviewFrameBorder.Height = Math.Clamp(h16x9, minH, maxH);
-            }
-
-            // DWM host cập nhật khi co giãn
-            if (KaraokeDwmHost?.Visibility == Visibility.Visible)
-            {
-                try { KaraokeDwmHost.UpdateThumbnailProperties(); }
-                catch { /* ignore */ }
-            }
-        }
-
-        if (ViewModel?.IsMixerWorkspace == true)
-            UpdateMixerLayout(w, h);
-    }
-
-    private void UpdateMixerLayout(double windowWidth, double windowHeight)
-    {
-        // The Mixer grid may still report its previous size while switching from Collapsed.
-        var gridWidth = Math.Max(320, windowWidth - 20);
-        var gridHeight = Math.Max(260, windowHeight - 92);
-
-        var transitionWidth = gridWidth switch
-        {
-            < 800 => 96,
-            < 1150 => 112,
-            _ => 128
-        };
-        MixerTransitionColumn.Width = new GridLength(transitionWidth);
-
-        var monitorWidth = Math.Max(180, (gridWidth - transitionWidth - 24) / 2);
-        var idealMonitorHeight = monitorWidth * 9.0 / 16.0 + 52;
-        var heightCap = Math.Clamp(gridHeight * 0.48, 190, 400);
-        var inputReserveCap = Math.Max(170, gridHeight - 150);
-        var monitorHeight = Math.Min(idealMonitorHeight, Math.Min(heightCap, inputReserveCap));
-        monitorHeight = Math.Max(170, monitorHeight);
-
-        var layoutChanged = !MixerMonitorRow.Height.IsAbsolute
-            || Math.Abs(MixerMonitorRow.Height.Value - monitorHeight) > 0.5;
-        MixerMonitorRow.Height = new GridLength(monitorHeight);
-
-        if (ViewModel is not null)
-        {
-            (ViewModel.MixerInputCardWidth, ViewModel.MixerInputCardHeight) = gridWidth switch
-            {
-                < 800 => (126, 112),
-                < 1150 => (150, 126),
-                < 1500 => (168, 138),
-                _ => (184, 148)
-            };
-        }
-
-        var compact = gridWidth < 900;
-        MixerCutButton.Height = compact ? 28 : 30;
-        MixerFadeButton.Height = compact ? 32 : 34;
-        MixerOutputToggle.Content = gridWidth < 820 ? "OUT" : "OUTPUT";
-        MixerProgramScreenText.Visibility = gridWidth < 1050
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-
-        _windowMirror.MaxWidth = (int)Math.Clamp(monitorWidth, 320, 1280);
-        if (layoutChanged)
-        {
-            Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.Render,
-                new Action(() =>
-                {
-                    if (MixerProgramDwmHost.Visibility == Visibility.Visible)
-                        MixerProgramDwmHost.UpdateThumbnailProperties();
-                }));
-        }
-    }
-
-    private void UpdateCueCardSizing()
-    {
-        if (ViewModel is null || !IsLoaded) return;
-        var count = ViewModel.FilteredCues.Count;
-        var available = Math.Max(280, ColMain.ActualWidth - 28);
-
-        double itemWidth = 112;
-        if (count is > 0 and <= 4)
-        {
-            var perCue = available / count;
-            itemWidth = Math.Clamp(perCue, 112, 132);
-        }
-
-        var scale = itemWidth / 112.0;
-        ViewModel.CueItemWidth = itemWidth;
-        ViewModel.CueItemHeight = Math.Clamp(382 * scale, 382, 450);
-    }
-
-
-
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         try
         {
             ClampToWorkingArea();
-            ApplyResponsiveLayout();
+            UpdateKaraokeProgramAspectRatio();
+            if (ViewModel is not null)
+                await ViewModel.InitializationTask;
             LoadKaraokeAudioOutputs(applySavedSelection: true);
 
             try
@@ -434,7 +187,7 @@ public partial class MainWindow : Window
             RefreshSoundEffectsBoard();
             _ = CheckForUpdatesAsync(interactive: false);
 
-            _ = Dispatcher.BeginInvoke(new Action(ApplyResponsiveLayout),
+            _ = Dispatcher.BeginInvoke(new Action(UpdateKaraokeProgramAspectRatio),
                 System.Windows.Threading.DispatcherPriority.Loaded);
         }
         catch (ObjectDisposedException) { }
@@ -467,7 +220,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        Dispatcher.BeginInvoke(RefreshActiveOutputPreview);
+        Dispatcher.BeginInvoke(RefreshKaraokeOnlyProgramPreview);
     }
 
 
@@ -527,9 +280,11 @@ public partial class MainWindow : Window
             {
                 if (delayRemoteMs > 0)
                 {
-                    _karaokeRemoteNavCts?.Cancel();
+                    var prev = _karaokeRemoteNavCts;
                     var cts = new CancellationTokenSource();
                     _karaokeRemoteNavCts = cts;
+                    prev?.Cancel();
+                    prev?.Dispose();
                     var remoteStr = remote.ToString();
                     _ = NavigateRemoteAfterDelayAsync(remoteStr, delayRemoteMs, cts.Token);
                 }
@@ -586,13 +341,6 @@ public partial class MainWindow : Window
         catch { /* ignore */ }
     }
 
-    private void PreviewFrameBorder_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        ApplyResponsiveLayout();
-        if (KaraokeDwmHost.Visibility == Visibility.Visible)
-            KaraokeDwmHost.UpdateThumbnailProperties();
-    }
-
     /// <summary>
     /// WebView2 nuốt phím WPF — inject JS bắt Esc rồi postMessage về app.
     /// </summary>
@@ -604,6 +352,8 @@ public partial class MainWindow : Window
             """
             (async function () {
               try {
+                if (window.self !== window.top) return;
+                if (!location.hostname.includes('huy.sale') && !location.hostname.includes('localhost')) return;
                 if (sessionStorage.getItem('__scpCacheResetV3')) return;
                 sessionStorage.setItem('__scpCacheResetV3', '1');
                 let changed = false;
@@ -628,14 +378,18 @@ public partial class MainWindow : Window
         await core.AddScriptToExecuteOnDocumentCreatedAsync(
             """
             (function () {
+              if (window.self !== window.top) return;
               if (window.__scpEscHook) return;
               window.__scpEscHook = true;
               window.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  try { chrome.webview.postMessage('ESC'); } catch (ex) {}
-                }
+                if (e.key !== 'Escape') return;
+                const t = e.target;
+                const tag = t && t.tagName ? t.tagName.toUpperCase() : '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+                if (document.querySelector('.swal2-container, [data-esc-trap="1"]')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                try { chrome.webview.postMessage('ESC'); } catch (ex) {}
               }, true);
             })();
             """);
@@ -652,49 +406,59 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(msg)) return;
 
         // Esc thuần từ hook JS, hoặc JSON action esc/escape
-        var isEsc =
-            msg.Equals("ESC", StringComparison.OrdinalIgnoreCase) ||
-            msg.Contains("\"action\":\"ESC\"", StringComparison.OrdinalIgnoreCase) ||
-            msg.Contains("\"action\":\"esc\"", StringComparison.OrdinalIgnoreCase) ||
-            msg.Contains("\"action\":\"escape\"", StringComparison.OrdinalIgnoreCase);
+        var isEsc = msg.Equals("ESC", StringComparison.OrdinalIgnoreCase);
+        string? action = null;
+        string? title = null;
+
+        if (!isEsc)
+        {
+            (action, title) = ParseKaraokeBridgeJson(msg);
+            if (!string.IsNullOrEmpty(action) &&
+                (action.Equals("esc", StringComparison.OrdinalIgnoreCase) ||
+                 action.Equals("escape", StringComparison.OrdinalIgnoreCase)))
+            {
+                isEsc = true;
+            }
+        }
 
         if (isEsc)
         {
-            Dispatcher.Invoke(() =>
+            Dispatcher.BeginInvoke(() =>
                 HandleEscapeKey(Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)));
             return;
         }
 
-        // NOW title / ready từ KTV player → panel status cố định
-        if (ViewModel is null) return;
-        var action = ExtractJsonStringField(msg, "action");
-        if (string.IsNullOrEmpty(action)) return;
-
-        var title = ExtractJsonStringField(msg, "title");
-        Dispatcher.Invoke(() => ViewModel.ApplyKaraokeBridgeState(action, title));
+        if (ViewModel is null || string.IsNullOrEmpty(action)) return;
+        Dispatcher.BeginInvoke(() => ViewModel.ApplyKaraokeBridgeState(action, title));
     }
 
-    private static string? ExtractJsonStringField(string json, string field)
+    private static (string? Action, string? Title) ParseKaraokeBridgeJson(string json)
     {
-        // Lightweight extract "field":"value" without full JSON dependency
         try
         {
-            var key = $"\"{field}\":";
-            var idx = json.IndexOf(key, StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) return null;
-            var i = idx + key.Length;
-            while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
-            if (i >= json.Length || json[i] != '"') return null;
-            i++;
-            var start = i;
-            while (i < json.Length && json[i] != '"')
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.String)
             {
-                if (json[i] == '\\' && i + 1 < json.Length) i += 2;
-                else i++;
+                var inner = root.GetString();
+                if (!string.IsNullOrWhiteSpace(inner) && inner.TrimStart().StartsWith('{'))
+                {
+                    using var innerDoc = System.Text.Json.JsonDocument.Parse(inner);
+                    if (innerDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        return (GetStringProp(innerDoc.RootElement, "action"), GetStringProp(innerDoc.RootElement, "title"));
+                }
+                return (null, null);
             }
-            return json[start..i];
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+                return (GetStringProp(root, "action"), GetStringProp(root, "title"));
         }
-        catch { return null; }
+        catch (System.Text.Json.JsonException) { }
+        return (null, null);
+
+        static string? GetStringProp(System.Text.Json.JsonElement el, string name)
+            => el.TryGetProperty(name, out var prop) && prop.ValueKind == System.Text.Json.JsonValueKind.String
+                ? prop.GetString()
+                : null;
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -702,26 +466,33 @@ public partial class MainWindow : Window
         _updateCts?.Cancel();
         _updateCts?.Dispose();
         _updateCts = null;
-        _soundEffectVolumeSaveCts?.Cancel();
-        _soundEffectVolumeSaveCts?.Dispose();
-        _soundEffectVolumeSaveCts = null;
-        MixerPreviewVideo.Stop();
-        MixerPreviewVideo.Source = null;
-        StopMixerProgramPreview();
-        StopKaraokeOutputCapture();
+        _karaokeRemoteNavCts?.Cancel();
+        _karaokeRemoteNavCts?.Dispose();
+        _karaokeRemoteNavCts = null;
+        StopKaraokeOnlyProgramPreview();
         StopAllSoundEffects(refresh: false);
         _soundEffectTimer.Stop();
         _windowMirror.Dispose();
         _karaokeSecondaryWindow?.Close();
+        _karaokeSecondaryWindow = null;
         KaraokeOnlyControlWebView.Dispose();
+        _karaokeOutputGate.Dispose();
         if (ViewModel is not null)
         {
             foreach (var id in _registeredSoundEffectHotkeys)
                 ViewModel.HotkeyService.Unregister(id);
             _registeredSoundEffectHotkeys.Clear();
+            ViewModel.VideoPlayer.WindowCreated -= OnVideoWindowCreated;
+            ViewModel.KaraokeOutputStopRequested -= OnKaraokeOutputStopRequested;
+            ViewModel.KaraokeUrlsChanged -= OnKaraokeUrlsChanged;
+            ViewModel.KaraokeAutoNextChanged -= OnKaraokeAutoNextChanged;
+            ViewModel.VideoScreenChanged -= OnVideoScreenChanged;
+            ViewModel.KaraokeToggleOutputRequested -= OnKaraokeToggleOutputRequested;
+            ViewModel.MixerKaraokeTakeRequested -= OnMixerKaraokeTakeRequested;
+            ViewModel.SoundEffectHotkeyPressed -= OnSoundEffectHotkeyPressed;
+            ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
             ViewModel.Settings.SettingsChanged -= Settings_SettingsChanged;
             ViewModel.AudioEngine.ChannelEnded -= SoundEffectAudio_ChannelEnded;
-            ViewModel.SoundEffectHotkeyPressed -= OnSoundEffectHotkeyPressed;
         }
     }
 
@@ -737,7 +508,7 @@ public partial class MainWindow : Window
             window.KaraokeProgressChanged += OnKaraokeProgressChanged;
             window.SetKaraokeMuted(_karaokeMuted);
         }
-        Dispatcher.Invoke(RefreshActiveOutputPreview);
+        Dispatcher.Invoke(RefreshKaraokeOnlyProgramPreview);
     }
 
     private void OnKaraokeStateChanged(string? action, string? title)
@@ -780,113 +551,25 @@ public partial class MainWindow : Window
             : $"{(int)time.TotalMinutes}:{time.Seconds:00}";
     }
 
-    private void UpdateMixerPreview()
-    {
-        try
-        {
-            MixerPreviewVideo.Stop();
-            MixerPreviewVideo.Source = null;
-            MixerPreviewVideo.Visibility = Visibility.Collapsed;
-            MixerPreviewImage.Source = null;
-            MixerPreviewImage.Visibility = Visibility.Collapsed;
-            MixerKaraokePreviewPlaceholder.Visibility = Visibility.Collapsed;
-
-            if (ViewModel?.IsMixerWorkspace != true)
-                return;
-            if (ViewModel.IsMixerKaraokePreview)
-            {
-                MixerKaraokePreviewPlaceholder.Visibility = Visibility.Visible;
-                return;
-            }
-            if (ViewModel.MixerPreviewInput is not { } input) return;
-            var path = input.Model.FilePath;
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
-
-            if (Services.MetadataService.IsImageFormat(path))
-            {
-                var bitmap = new BitmapImage();
-                bitmap.BeginInit();
-                bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                bitmap.UriSource = new Uri(path, UriKind.Absolute);
-                bitmap.EndInit();
-                bitmap.Freeze();
-                MixerPreviewImage.Source = bitmap;
-                MixerPreviewImage.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                MixerPreviewVideo.Source = new Uri(path, UriKind.Absolute);
-                MixerPreviewVideo.Volume = 0;
-                MixerPreviewVideo.IsMuted = true;
-                MixerPreviewVideo.Visibility = Visibility.Visible;
-                MixerPreviewVideo.Play();
-            }
-        }
-        catch
-        {
-            MixerPreviewVideo.Visibility = Visibility.Collapsed;
-            MixerPreviewImage.Visibility = Visibility.Collapsed;
-            MixerKaraokePreviewPlaceholder.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private void RefreshActiveOutputPreview()
-    {
-        if (ViewModel?.IsMixerWorkspace == true)
-        {
-            RefreshMixerProgramPreview();
-            return;
-        }
-
-        StopMixerProgramPreview();
-        RefreshKaraokeOnlyProgramPreview();
-    }
-
     private void RefreshKaraokeOnlyProgramPreview()
     {
+        StopKaraokeOnlyProgramPreview();
         var output = ViewModel?.VideoPlayer.OutputWindow;
         if (ViewModel?.IsKaraokeOutputOn != true || output?.IsLoaded != true)
         {
-            try { KaraokeOnlyProgramDwmHost.ClearSource(); } catch { /* ignore */ }
-            KaraokeOnlyProgramDwmHost.Visibility = Visibility.Collapsed;
             KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Visible;
             return;
         }
-
-        try
-        {
-            var hwnd = new WindowInteropHelper(output).EnsureHandle();
-            if (hwnd == IntPtr.Zero) return;
-            KaraokeOnlyProgramDwmHost.Visibility = Visibility.Visible;
-            KaraokeOnlyProgramDwmHost.UpdateLayout();
-            KaraokeOnlyProgramDwmHost.SetSource(hwnd);
-            KaraokeOnlyProgramDwmHost.UpdateThumbnailProperties();
-            KaraokeOnlyProgramPlaceholder.Visibility = KaraokeOnlyProgramDwmHost.HasThumbnail
-                ? Visibility.Collapsed
-                : Visibility.Visible;
-        }
-        catch
-        {
-            KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Visible;
-        }
-    }
-
-    private void RefreshMixerProgramPreview()
-    {
-        StopMixerProgramPreview();
-        if (ViewModel?.IsMixerWorkspace != true
-            || ViewModel.VideoPlayer.IsOutputArmed != true
-            || ViewModel.VideoPlayer.OutputWindow is not { IsLoaded: true } output)
-            return;
 
         var captureSession = new CancellationTokenSource();
-        _mixerProgramCaptureCts = captureSession;
-        MixerProgramDwmHost.Visibility = Visibility.Visible;
-        MixerProgramDwmHost.UpdateLayout();
-        _ = TryStartMixerProgramDwmThenFallbackAsync(output, captureSession);
+        _karaokeOnlyCaptureCts = captureSession;
+        KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Collapsed;
+        KaraokeOnlyProgramDwmHost.Visibility = Visibility.Visible;
+        KaraokeOnlyProgramDwmHost.UpdateLayout();
+        _ = TryStartKaraokeOnlyProgramDwmThenFallbackAsync(output, captureSession);
     }
 
-    private async Task TryStartMixerProgramDwmThenFallbackAsync(
+    private async Task TryStartKaraokeOnlyProgramDwmThenFallbackAsync(
         Views.VideoWindow output,
         CancellationTokenSource captureSession)
     {
@@ -902,38 +585,39 @@ public partial class MainWindow : Window
                     cancellationToken);
                 await Task.Delay(40 + attempt * 35, cancellationToken);
 
-                if (!IsMixerProgramCaptureCurrent(output, captureSession))
+                if (!IsKaraokeOnlyProgramCaptureCurrent(output, captureSession))
                     return;
 
                 var hwnd = new WindowInteropHelper(output).EnsureHandle();
                 if (hwnd == IntPtr.Zero) continue;
 
-                MixerProgramDwmHost.Visibility = Visibility.Visible;
-                MixerProgramDwmHost.UpdateLayout();
-                MixerProgramDwmHost.SetSource(hwnd);
-                MixerProgramDwmHost.UpdateThumbnailProperties();
+                KaraokeOnlyProgramDwmHost.Visibility = Visibility.Visible;
+                KaraokeOnlyProgramDwmHost.UpdateLayout();
+                KaraokeOnlyProgramDwmHost.SetSource(hwnd);
+                KaraokeOnlyProgramDwmHost.UpdateThumbnailProperties();
 
-                if (MixerProgramDwmHost.HasThumbnail)
+                if (KaraokeOnlyProgramDwmHost.HasThumbnail)
                 {
-                    MixerProgramCaptureImage.Source = null;
-                    MixerProgramCaptureImage.Visibility = Visibility.Collapsed;
+                    KaraokeOnlyProgramCaptureImage.Source = null;
+                    KaraokeOnlyProgramCaptureImage.Visibility = Visibility.Collapsed;
+                    KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Collapsed;
                     _windowMirror.Stop();
                     return;
                 }
 
-                if (MixerProgramDwmHost.LastHResult is not null)
+                if (KaraokeOnlyProgramDwmHost.LastHResult is not null)
                     break;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
             await Dispatcher.InvokeAsync(
-                () => StartMixerProgramCaptureFallback(output, captureSession),
+                () => StartKaraokeOnlyProgramCaptureFallback(output, captureSession),
                 System.Windows.Threading.DispatcherPriority.Normal,
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Expected when Output or workspace changes while the mirror is starting.
+            // Expected when Karaoke output closes or workspace switches.
         }
         catch
         {
@@ -941,61 +625,67 @@ public partial class MainWindow : Window
             {
                 _ = Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    if (IsMixerProgramCaptureCurrent(output, captureSession))
-                        StartMixerProgramCaptureFallback(output, captureSession);
+                    if (IsKaraokeOnlyProgramCaptureCurrent(output, captureSession))
+                        StartKaraokeOnlyProgramCaptureFallback(output, captureSession);
                 }));
             }
         }
     }
 
-    private bool IsMixerProgramCaptureCurrent(
+    private bool IsKaraokeOnlyProgramCaptureCurrent(
         Views.VideoWindow output,
         CancellationTokenSource captureSession)
-        => ReferenceEquals(_mixerProgramCaptureCts, captureSession)
+        => ReferenceEquals(_karaokeOnlyCaptureCts, captureSession)
            && !captureSession.IsCancellationRequested
-           && ViewModel?.IsMixerWorkspace == true
-           && ViewModel.VideoPlayer.IsOutputArmed
+           && ViewModel?.IsKaraokeOutputOn == true
            && ReferenceEquals(ViewModel.VideoPlayer.OutputWindow, output)
            && output.IsLoaded;
 
-    private void StartMixerProgramCaptureFallback(
+    private void StartKaraokeOnlyProgramCaptureFallback(
         Views.VideoWindow output,
         CancellationTokenSource captureSession)
     {
-        if (!IsMixerProgramCaptureCurrent(output, captureSession))
+        if (!IsKaraokeOnlyProgramCaptureCurrent(output, captureSession))
             return;
 
-        try { MixerProgramDwmHost.ClearSource(); } catch { /* ignore */ }
-        MixerProgramDwmHost.Visibility = Visibility.Collapsed;
-        MixerProgramCaptureImage.Source = null;
-        MixerProgramCaptureImage.Visibility = Visibility.Visible;
+        try { KaraokeOnlyProgramDwmHost.ClearSource(); } catch { /* ignore */ }
+        KaraokeOnlyProgramDwmHost.Visibility = Visibility.Collapsed;
+        KaraokeOnlyProgramCaptureImage.Source = null;
+        KaraokeOnlyProgramCaptureImage.Visibility = Visibility.Visible;
+        KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Collapsed;
 
         var hwnd = new WindowInteropHelper(output).Handle;
         if (hwnd == IntPtr.Zero)
             hwnd = new WindowInteropHelper(output).EnsureHandle();
-        if (hwnd == IntPtr.Zero) return;
+        if (hwnd == IntPtr.Zero)
+        {
+            KaraokeOnlyProgramCaptureImage.Visibility = Visibility.Collapsed;
+            KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Visible;
+            return;
+        }
 
-        var panelWidth = MixerProgramCaptureImage.ActualWidth;
-        _windowMirror.MaxWidth = (int)Math.Clamp(panelWidth > 40 ? panelWidth : 960, 480, 1280);
+        var panelWidth = KaraokeOnlyProgramFrame.ActualWidth;
+        _windowMirror.MaxWidth = (int)Math.Clamp(panelWidth > 40 ? panelWidth : 640, 480, 1280);
         _windowMirror.IntervalMs = 33;
         _windowMirror.Start(hwnd, frame =>
         {
-            if (frame is not null && IsMixerProgramCaptureCurrent(output, captureSession))
-                MixerProgramCaptureImage.Source = frame;
+            if (frame is not null && IsKaraokeOnlyProgramCaptureCurrent(output, captureSession))
+                KaraokeOnlyProgramCaptureImage.Source = frame;
         });
     }
 
-    private void StopMixerProgramPreview()
+    private void StopKaraokeOnlyProgramPreview()
     {
-        var captureSession = _mixerProgramCaptureCts;
-        _mixerProgramCaptureCts = null;
+        var captureSession = _karaokeOnlyCaptureCts;
+        _karaokeOnlyCaptureCts = null;
         captureSession?.Cancel();
         captureSession?.Dispose();
         _windowMirror.Stop();
-        MixerProgramCaptureImage.Source = null;
-        MixerProgramCaptureImage.Visibility = Visibility.Collapsed;
-        try { MixerProgramDwmHost.ClearSource(); } catch { /* ignore */ }
-        MixerProgramDwmHost.Visibility = Visibility.Collapsed;
+        KaraokeOnlyProgramCaptureImage.Source = null;
+        KaraokeOnlyProgramCaptureImage.Visibility = Visibility.Collapsed;
+        try { KaraokeOnlyProgramDwmHost.ClearSource(); } catch { /* ignore */ }
+        KaraokeOnlyProgramDwmHost.Visibility = Visibility.Collapsed;
+        KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Visible;
     }
 
     private void OnKaraokeProcessFailed(object? sender, string failureKind)
@@ -1136,34 +826,10 @@ public partial class MainWindow : Window
     private void OnKaraokeOutputStopRequested(object? sender, EventArgs e)
         => CloseKaraokeSecondaryIfOpen();
 
-    // ─── Thao tác nhanh (Click fallback — luôn chạy được) ─────────
-
-    private void BtnQuickArm_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        if (!ViewModel.CanMutateShowConfiguration("thay đổi trạng thái output")) return;
-        // Toggle qua property → OnIsVideoOutputEnabledChanged → arm/disarm thật
-        ViewModel.IsVideoOutputEnabled = !ViewModel.IsVideoOutputEnabled;
-        ApplyResponsiveLayout();
-        e.Handled = true;
-    }
-
-    private void BtnQuickStopAll_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        if (ViewModel.StopAllCommand.CanExecute(null))
-            ViewModel.StopAllCommand.Execute(null);
-        StopAllSoundEffects();
-        CloseKaraokeSecondaryIfOpen();
-        e.Handled = true;
-    }
-
     private void CloseKaraokeSecondaryIfOpen()
     {
         Interlocked.Increment(ref _karaokeOutputVersion);
-        bool refreshShowPreview = ViewModel?.IsShowWorkspace == true;
-        if (refreshShowPreview)
-            StopKaraokeOutputCapture();
+        StopKaraokeOnlyProgramPreview();
 
         // 2) Pause (an toàn nếu webview còn)
         try
@@ -1180,163 +846,11 @@ public partial class MainWindow : Window
             try { win.HideKaraoke(); } catch { /* ignore */ }
         }
 
-        if (refreshShowPreview)
-            RefreshActiveOutputPreview();
-
         // Luôn OFF — kể cả khi window đã chết sẵn (X/taskbar) mà UI còn ON
         ViewModel?.SetKaraokeOutputOn(false);
         if (ViewModel is not null)
             ViewModel.ProgramOutputModeText = "ĐÃ TẮT";
         ResetKaraokeProgress();
-    }
-
-    /// <summary>
-    /// Mirror the Program output HWND for every source: standby, local media, and Karaoke.
-    /// DWM is preferred; PrintWindow capture is the compatibility fallback.
-    /// </summary>
-    private void StartKaraokeOutputCapture()
-    {
-        RefreshKaraokeOnlyProgramPreview();
-    }
-
-    private void StartOutputWindowCapture(Views.VideoWindow? outputWindow)
-    {
-        if (outputWindow is null
-            || ViewModel?.IsShowWorkspace != true
-            || ViewModel.IsLivePreviewVisible != true
-            || ViewModel.VideoPlayer.IsOutputArmed != true)
-        {
-            StopKaraokeOutputCapture();
-            PreviewPlaceholder.Visibility = Visibility.Visible;
-            return;
-        }
-
-        // Preview ẩn → không mirror
-        _previewSourceWindow = outputWindow;
-        _karaokeCaptureCts?.Cancel();
-        _karaokeCaptureCts?.Dispose();
-        _karaokeCaptureCts = new CancellationTokenSource();
-
-        PreviewPlaceholder.Visibility = Visibility.Collapsed;
-        KaraokeCaptureImage.Visibility = Visibility.Collapsed;
-        KaraokeCaptureImage.Source = null;
-
-        // DWM trước (gần VisualBrush USB). Fail → HWND mirror.
-        KaraokeDwmHost.Visibility = Visibility.Visible;
-        KaraokeDwmHost.UpdateLayout();
-
-        _ = TryStartDwmThenFallbackAsync(_karaokeCaptureCts.Token);
-    }
-
-    private async Task TryStartDwmThenFallbackAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await TryStartDwmThenFallbackCoreAsync(cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Preview lifecycle cancellation is expected when the source changes or turns off.
-        }
-    }
-
-    private async Task TryStartDwmThenFallbackCoreAsync(CancellationToken cancellationToken)
-    {
-        for (var attempt = 0; attempt < 10; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Loaded, cancellationToken);
-            await Task.Delay(40 + attempt * 35, cancellationToken);
-
-            var outputWindow = _previewSourceWindow;
-            if (outputWindow is null || !outputWindow.IsLoaded)
-                continue;
-
-            try
-            {
-                var src = new WindowInteropHelper(outputWindow).EnsureHandle();
-                if (src == IntPtr.Zero) continue;
-
-                KaraokeDwmHost.Visibility = Visibility.Visible;
-                KaraokeDwmHost.UpdateLayout();
-                KaraokeDwmHost.SetSource(src);
-                KaraokeDwmHost.UpdateThumbnailProperties();
-
-                if (KaraokeDwmHost.HasThumbnail)
-                {
-                    KaraokeCaptureImage.Visibility = Visibility.Collapsed;
-                    _windowMirror.Stop();
-                    if (ViewModel is not null)
-                        ViewModel.StatusMessage = "Preview VIEW (DWM) ⇄ OUTPUT · mượt như USB";
-                    return;
-                }
-
-                if (KaraokeDwmHost.LastHResult is not null)
-                    break;
-            }
-            catch { /* retry / fallback */ }
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        await Dispatcher.InvokeAsync(StartCaptureFallback, System.Windows.Threading.DispatcherPriority.Normal, cancellationToken);
-    }
-
-    private void StartCaptureFallback()
-    {
-        var outputWindow = _previewSourceWindow;
-        if (outputWindow is null) return;
-        if (ViewModel?.IsShowWorkspace != true || ViewModel.IsLivePreviewVisible != true)
-        {
-            StopKaraokeOutputCapture();
-            return;
-        }
-
-        try { KaraokeDwmHost.ClearSource(); } catch { /* ignore */ }
-        KaraokeDwmHost.Visibility = Visibility.Collapsed;
-        KaraokeCaptureImage.Visibility = Visibility.Visible;
-        PreviewPlaceholder.Visibility = Visibility.Collapsed;
-
-        var hwnd = new WindowInteropHelper(outputWindow).Handle;
-        if (hwnd == IntPtr.Zero)
-            hwnd = new WindowInteropHelper(outputWindow).EnsureHandle();
-        if (hwnd == IntPtr.Zero) return;
-
-        // Scale theo bề ngang panel preview (~mượt 30fps)
-        double panelW = PreviewFrameBorder?.ActualWidth ?? 480;
-        _windowMirror.MaxWidth = (int)Math.Clamp(panelW > 40 ? panelW : 640, 480, 1280);
-        _windowMirror.IntervalMs = 33; // ~30 FPS — view control
-        _windowMirror.Start(hwnd, frame =>
-        {
-            if (frame is null) return;
-            KaraokeCaptureImage.Source = frame;
-        });
-
-        if (ViewModel is not null)
-            ViewModel.StatusMessage = "Preview VIEW (HWND mirror) ⇄ OUTPUT · ~30 FPS";
-    }
-
-    private void StopKaraokeOutputCapture()
-    {
-        _karaokeCaptureCts?.Cancel();
-        _karaokeCaptureCts?.Dispose();
-        _karaokeCaptureCts = null;
-        _previewSourceWindow = null;
-        _windowMirror.Stop();
-        KaraokeCaptureImage.Source = null;
-        KaraokeCaptureImage.Visibility = Visibility.Collapsed;
-        try
-        {
-            KaraokeDwmHost.ClearSource();
-            KaraokeDwmHost.Visibility = Visibility.Collapsed;
-        }
-        catch { /* ignore */ }
-        try
-        {
-            KaraokeOnlyProgramDwmHost.ClearSource();
-            KaraokeOnlyProgramDwmHost.Visibility = Visibility.Collapsed;
-            KaraokeOnlyProgramPlaceholder.Visibility = Visibility.Visible;
-        }
-        catch { /* ignore */ }
     }
 
     private static bool IsTypingInTextBox()
@@ -1534,7 +1048,7 @@ public partial class MainWindow : Window
             FitToWorkingArea();
             _isWorkAreaMaximized = true;
         }
-        ApplyResponsiveLayout();
+        UpdateKaraokeProgramAspectRatio();
     }
 
     /// <summary>Phóng vừa vùng làm việc (trừ taskbar mọi cạnh).</summary>
@@ -1603,17 +1117,6 @@ public partial class MainWindow : Window
 
     private void BtnClose_Click(object sender, RoutedEventArgs e)
         => Close();
-
-    /// <summary>Opens a button's ContextMenu as a drop-down (used by Add / More).</summary>
-    private void OpenButtonMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button btn || btn.ContextMenu is null) return;
-        btn.ContextMenu.PlacementTarget = btn;
-        btn.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-        btn.ContextMenu.DataContext = btn.DataContext ?? DataContext;
-        btn.ContextMenu.IsOpen = true;
-        e.Handled = true;
-    }
 
     // ─── Karaoke Logic (operator desk) ───────────────────────────────────
 
@@ -1722,7 +1225,7 @@ public partial class MainWindow : Window
             }
 
             ViewModel.SetMixerKaraokeProgramActive(true);
-            RefreshActiveOutputPreview();
+            RefreshKaraokeOnlyProgramPreview();
             if (useFade)
                 await ViewModel.VideoPlayer.FadeProgramMaskAsync(false,
                     Math.Clamp(ViewModel.MixerTransitionDurationMs, 0, 5000) / 2000d);
@@ -1737,22 +1240,30 @@ public partial class MainWindow : Window
 
     private async void BtnKaraokeToggleSecondary_Click(object sender, RoutedEventArgs e)
     {
-        // Nguồn sự thật = state UI: nếu đang ON (hoặc còn cửa sổ sống) → luôn TẮT.
-        // Tránh bug: đóng tab OUTPUT bằng X/taskbar → window chết nhưng UI vẫn ON,
-        // bấm "KARAOKE OFF" lại mở cửa sổ mới (vẫn ON).
-        ViewModel?.CancelMixerTakeForExternalProgramChange();
-        bool wantOff = ViewModel?.IsKaraokeOutputOn == true;
-        if (wantOff)
+        try
         {
-            CloseKaraokeSecondaryIfOpen();
-            return;
+            // Nguồn sự thật = state UI: nếu đang ON (hoặc còn cửa sổ sống) → luôn TẮT.
+            // Tránh bug: đóng tab OUTPUT bằng X/taskbar → window chết nhưng UI vẫn ON,
+            // bấm "KARAOKE OFF" lại mở cửa sổ mới (vẫn ON).
+            ViewModel?.CancelMixerTakeForExternalProgramChange();
+            bool wantOff = ViewModel?.IsKaraokeOutputOn == true;
+            if (wantOff)
+            {
+                CloseKaraokeSecondaryIfOpen();
+                return;
+            }
+            // KARAOKE ON chỉ khởi động nguồn Program nội bộ. Cửa sổ M1/M2 là thao tác riêng.
+            ViewModel!.VideoPlayer.SetPreviewOnlyOutput();
+            if (await OpenKaraokeOutputAsync())
+            {
+                ViewModel.ProgramOutputModeText = "PROGRAM · LIVE";
+                ViewModel.StatusMessage = "Karaoke ON · đang hiển thị trong PROGRAM";
+            }
         }
-        // KARAOKE ON chỉ khởi động nguồn Program nội bộ. Cửa sổ M1/M2 là thao tác riêng.
-        ViewModel!.VideoPlayer.SetPreviewOnlyOutput();
-        if (await OpenKaraokeOutputAsync())
+        catch (Exception ex)
         {
-            ViewModel.ProgramOutputModeText = "PROGRAM · LIVE";
-            ViewModel.StatusMessage = "Karaoke ON · đang hiển thị trong PROGRAM";
+            if (ViewModel is not null)
+                ViewModel.StatusMessage = $"Lỗi bật/tắt Karaoke: {ex.Message}";
         }
     }
 
@@ -1802,9 +1313,6 @@ public partial class MainWindow : Window
                 return false;
             }
 
-            // Preview = DWM/capture OUTPUT
-            StartKaraokeOutputCapture();
-
             // Remote được mở sau khi master đã đăng ký session.
             if (Uri.TryCreate(ViewModel.KaraokeRemoteUrl, UriKind.Absolute, out var remote))
             {
@@ -1816,7 +1324,10 @@ public partial class MainWindow : Window
 
             if (outputVersion != Volatile.Read(ref _karaokeOutputVersion)) return false;
             ViewModel.SetKaraokeOutputOn(true);
-            ViewModel.ProgramOutputModeText = $"{ViewModel.SelectedVideoScreen?.ShortName ?? "OUTPUT"} · LIVE";
+            RefreshKaraokeOnlyProgramPreview();
+            ViewModel.ProgramOutputModeText = ViewModel.VideoPlayer.IsPreviewOnlyOutput
+                ? "PROGRAM · LIVE"
+                : $"{ViewModel.SelectedVideoScreen?.ShortName ?? "OUTPUT"} · LIVE";
             ViewModel.StatusMessage = $"Karaoke sẵn sàng · session {ViewModel.KaraokeSessionId}";
             return true;
         }
@@ -1908,7 +1419,7 @@ public partial class MainWindow : Window
         if (ViewModel.IsVideoOutputEnabled)
             ViewModel.IsVideoOutputEnabled = false;
         ViewModel.VideoPlayer.SetPreviewOnlyOutput();
-        RefreshActiveOutputPreview();
+        RefreshKaraokeOnlyProgramPreview();
         ViewModel.ProgramOutputModeText = "OUTPUT OFF · LIVE";
         ViewModel.StatusMessage = "Output ngoài đã tắt · PROGRAM và phiên Karaoke vẫn đang chạy";
     }
@@ -1987,7 +1498,7 @@ public partial class MainWindow : Window
         if (ViewModel.IsVideoOutputEnabled)
             ViewModel.IsVideoOutputEnabled = false;
         ViewModel.VideoPlayer.SetPreviewOnlyOutput();
-        RefreshActiveOutputPreview();
+        RefreshKaraokeOnlyProgramPreview();
         ViewModel.ProgramOutputModeText = "OUTPUT OFF · LIVE";
         ViewModel.StatusMessage = "Đã tắt Output ngoài · PROGRAM và phiên Karaoke vẫn được giữ nguyên";
     }
@@ -2043,8 +1554,16 @@ public partial class MainWindow : Window
             KaraokeAudioOutputCombo.SelectedItem is not Models.AudioOutputEndpoint endpoint)
             return;
 
-        if (ApplyKaraokeAudioOutput(endpoint, save: true) && ViewModel is not null)
-            await ViewModel.Settings.SaveAsync();
+        try
+        {
+            if (ApplyKaraokeAudioOutput(endpoint, save: true) && ViewModel is not null)
+                await ViewModel.Settings.SaveAsync();
+        }
+        catch (Exception ex)
+        {
+            if (ViewModel is not null)
+                ViewModel.StatusMessage = $"Lỗi lưu AUDIO OUT: {ex.Message}";
+        }
     }
 
     private void RefreshKaraokeAudioOutputs_Click(object sender, RoutedEventArgs e)
@@ -2059,20 +1578,25 @@ public partial class MainWindow : Window
 
             // BASS phát soundboard bằng engine riêng; chuyển nó sang thiết bị cùng tên nếu tìm thấy.
             var bassDevices = ViewModel.AudioEngine.GetOutputDevices();
-            var endpointKey = NormalizeAudioDeviceName(endpoint.Name);
             var bassDevice = bassDevices
                 .Where(device => device.IsEnabled && device.Index != 0)
-                .OrderByDescending(device => AudioDeviceMatchScore(
-                    endpointKey, NormalizeAudioDeviceName(device.Name)))
-                .FirstOrDefault(device => AudioDeviceMatchScore(
-                    endpointKey, NormalizeAudioDeviceName(device.Name)) > 0);
+                .Select(device => (Device: device, Score: AudioDeviceMatchScore(endpoint.Name, device.Name)))
+                .Where(pair => pair.Score > 0)
+                .OrderByDescending(pair => pair.Score)
+                .Select(pair => pair.Device)
+                .FirstOrDefault();
             if (bassDevice is not null && ViewModel.AudioEngine.CurrentDeviceIndex != bassDevice.Index)
             {
                 StopAllSoundEffects();
                 if (ViewModel.AudioEngine.SwitchDevice(bassDevice.Index))
                 {
+                    _soundEffectAudioInitialized = ViewModel.AudioEngine.CurrentDeviceIndex != 0;
                     ViewModel.Settings.Current.AudioDeviceIndex = bassDevice.Index;
                     ViewModel.Settings.Current.AudioDeviceName = bassDevice.Name;
+                }
+                else
+                {
+                    _soundEffectAudioInitialized = false;
                 }
             }
 
@@ -2097,16 +1621,32 @@ public partial class MainWindow : Window
         => new((value ?? string.Empty).Where(char.IsLetterOrDigit)
             .Select(char.ToLowerInvariant).ToArray());
 
-    private static int AudioDeviceMatchScore(string endpoint, string bass)
+    private static int AudioDeviceMatchScore(string endpointRaw, string bassRaw)
     {
+        var endpoint = NormalizeAudioDeviceName(endpointRaw);
+        var bass = NormalizeAudioDeviceName(bassRaw);
         if (endpoint.Length == 0 || bass.Length == 0) return 0;
         if (endpoint == bass) return 100;
         if (endpoint.Contains(bass, StringComparison.Ordinal) ||
             bass.Contains(endpoint, StringComparison.Ordinal)) return 80;
 
-        var commonPrefix = endpoint.Zip(bass).TakeWhile(pair => pair.First == pair.Second).Count();
-        return commonPrefix >= 6 ? commonPrefix : 0;
+        var endpointTokens = ExtractDeviceTokens(endpointRaw);
+        var bassTokens = ExtractDeviceTokens(bassRaw);
+        if (endpointTokens.Count > 0 && bassTokens.Count > 0)
+        {
+            int shared = endpointTokens.Count(tok =>
+                bassTokens.Any(bt => bt.Contains(tok, StringComparison.Ordinal) || tok.Contains(bt, StringComparison.Ordinal)));
+            if (shared > 0)
+                return 40 + shared * 10;
+        }
+        return 0;
     }
+
+    private static List<string> ExtractDeviceTokens(string raw)
+        => raw.Split(new[] { ' ', '(', ')', '[', ']', '-', '_', '/' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(NormalizeAudioDeviceName)
+            .Where(t => t.Length >= 3 && t is not ("speakers" or "headphones" or "audio" or "output" or "device" or "high" or "definition"))
+            .ToList();
 
     private void KaraokeProgressSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         => _karaokeProgressSeeking = true;
@@ -2117,8 +1657,16 @@ public partial class MainWindow : Window
         _karaokeProgressSeeking = false;
         var position = KaraokeProgressSlider.Value;
         KaraokeElapsedText.Text = FormatKaraokeTime(position);
-        if (ViewModel?.VideoPlayer.OutputWindow is { } outputWindow)
-            await outputWindow.SeekKaraokeAsync(position);
+        try
+        {
+            if (ViewModel?.VideoPlayer.OutputWindow is { } outputWindow)
+                await outputWindow.SeekKaraokeAsync(position);
+        }
+        catch (Exception ex)
+        {
+            if (ViewModel is not null)
+                ViewModel.StatusMessage = $"Lỗi tua Karaoke: {ex.Message}";
+        }
     }
 
     private void ResetKaraokeProgress()
@@ -2285,37 +1833,44 @@ public partial class MainWindow : Window
     private async void BtnAddSoundEffects_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
-        var dialog = new Microsoft.Win32.OpenFileDialog
+        try
         {
-            Title = "Thêm âm thanh vào Soundboard",
-            Filter = "File âm thanh|*.mp3;*.wav;*.m4a;*.aac;*.wma;*.flac;*.ogg;*.opus|Tất cả file|*.*",
-            Multiselect = true
-        };
-        if (dialog.ShowDialog(this) != true) return;
-
-        var effects = ViewModel.Settings.Current.KaraokeSoundEffects;
-        foreach (var filePath in dialog.FileNames)
-        {
-            if (effects.Count >= 200) break;
-            var defaultName = System.IO.Path.GetFileNameWithoutExtension(filePath);
-            var name = defaultName;
-            if (dialog.FileNames.Length == 1)
+            var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                var nameDialog = new Controls.Dialogs.InputDialog(
-                    "Tên hiệu ứng", "Nhập tên hiển thị trên nút:", defaultName) { Owner = this };
-                if (nameDialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(nameDialog.Result))
-                    name = nameDialog.Result.Trim();
+                Title = "Thêm âm thanh vào Soundboard",
+                Filter = "File âm thanh|*.mp3;*.wav;*.m4a;*.aac;*.wma;*.flac;*.ogg;*.opus|Tất cả file|*.*",
+                Multiselect = true
+            };
+            if (dialog.ShowDialog(this) != true) return;
+
+            var effects = ViewModel.Settings.Current.KaraokeSoundEffects;
+            foreach (var filePath in dialog.FileNames)
+            {
+                if (effects.Count >= 200) break;
+                var defaultName = System.IO.Path.GetFileNameWithoutExtension(filePath);
+                var name = defaultName;
+                if (dialog.FileNames.Length == 1)
+                {
+                    var nameDialog = new Controls.Dialogs.InputDialog(
+                        "Tên hiệu ứng", "Nhập tên hiển thị trên nút:", defaultName) { Owner = this };
+                    if (nameDialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(nameDialog.Result))
+                        name = nameDialog.Result.Trim();
+                }
+
+                effects.Add(new Models.KaraokeSoundEffect
+                {
+                    Name = name,
+                    FilePath = filePath
+                });
             }
 
-            effects.Add(new Models.KaraokeSoundEffect
-            {
-                Name = name,
-                FilePath = filePath
-            });
+            await SaveSoundEffectsAsync();
+            ViewModel.StatusMessage = $"Đã thêm {dialog.FileNames.Length} hiệu ứng âm thanh";
         }
-
-        await SaveSoundEffectsAsync();
-        ViewModel.StatusMessage = $"Đã thêm {dialog.FileNames.Length} hiệu ứng âm thanh";
+        catch (Exception ex)
+        {
+            ViewModel.StatusMessage = $"Lỗi thêm hiệu ứng: {ex.Message}";
+        }
     }
 
     private async void SoundEffectButton_Click(object sender, RoutedEventArgs e)
@@ -2413,8 +1968,10 @@ public partial class MainWindow : Window
 
     private bool EnsureSoundEffectAudio()
     {
-        if (_soundEffectAudioInitialized) return true;
         if (ViewModel is null) return false;
+        if (_soundEffectAudioInitialized && ViewModel.AudioEngine.CurrentDeviceIndex > 0)
+            return true;
+        ViewModel.AudioEngine.ConfigureBuffer(ViewModel.Settings.Current.AudioBufferMs);
         _soundEffectAudioInitialized = ViewModel.AudioEngine.Initialize(
             ViewModel.Settings.Current.AudioDeviceIndex)
             && ViewModel.AudioEngine.CurrentDeviceIndex != 0;
@@ -2568,18 +2125,13 @@ public partial class MainWindow : Window
         if (_soundEffectHandles.TryGetValue(effect.Id, out var handle))
             ViewModel.AudioEngine.SetVolume(handle, GetEffectiveSoundEffectVolume(effect));
 
-        _soundEffectVolumeSaveCts?.Cancel();
-        _soundEffectVolumeSaveCts?.Dispose();
-        var saveCts = new CancellationTokenSource();
-        _soundEffectVolumeSaveCts = saveCts;
         try
         {
-            await Task.Delay(400, saveCts.Token);
-            await ViewModel.Settings.SaveAsync();
+            await ViewModel.Settings.SaveDebouncedAsync();
         }
-        catch (OperationCanceledException)
+        catch (Exception ex)
         {
-            // A newer slider value will be saved instead.
+            ViewModel.StatusMessage = $"Lỗi lưu âm lượng hiệu ứng: {ex.Message}";
         }
     }
 
@@ -2614,24 +2166,31 @@ public partial class MainWindow : Window
     private async void BtnSoundEffectPlayPause_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel is null || _selectedSoundEffect is not { } effect) return;
-        if (!_soundEffectHandles.TryGetValue(effect.Id, out var handle))
+        try
         {
-            await StartSoundEffectAsync(effect);
-            return;
+            if (!_soundEffectHandles.TryGetValue(effect.Id, out var handle))
+            {
+                await StartSoundEffectAsync(effect);
+                return;
+            }
+            if (ViewModel.AudioEngine.IsPlaying(handle))
+            {
+                ViewModel.AudioEngine.Pause(handle);
+                effect.IsPlaying = false;
+                effect.IsPaused = true;
+            }
+            else
+            {
+                ViewModel.AudioEngine.Resume(handle);
+                effect.IsPlaying = true;
+                effect.IsPaused = false;
+            }
+            RefreshSoundEffectsBoard();
         }
-        if (ViewModel.AudioEngine.IsPlaying(handle))
+        catch (Exception ex)
         {
-            ViewModel.AudioEngine.Pause(handle);
-            effect.IsPlaying = false;
-            effect.IsPaused = true;
+            ViewModel.StatusMessage = $"Lỗi hiệu ứng âm thanh: {ex.Message}";
         }
-        else
-        {
-            ViewModel.AudioEngine.Resume(handle);
-            effect.IsPlaying = true;
-            effect.IsPaused = false;
-        }
-        RefreshSoundEffectsBoard();
     }
 
     private void BtnSoundEffectStop_Click(object sender, RoutedEventArgs e)

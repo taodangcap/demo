@@ -17,11 +17,15 @@ public interface IPreloadManager
 /// Preloads audio files in the background into memory-resident BASS streams.
 /// Maintains a small LRU cache to avoid memory bloat.
 /// </summary>
-public sealed class PreloadManager : IPreloadManager
+public sealed class PreloadManager : IPreloadManager, IDisposable
 {
     private readonly IAudioEngine _audio;
     private readonly ILogger<PreloadManager> _logger;
-    private readonly Dictionary<string, int> _cache = new Dictionary<string, int>();
+    private readonly Dictionary<string, int> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _lruOrder = new();
+    private readonly object _gate = new();
+    private long _generation;
+    private bool _disposed;
     private const int MaxCacheSize = 3;
 
     public PreloadManager(IAudioEngine audio, ILogger<PreloadManager> logger)
@@ -33,39 +37,100 @@ public sealed class PreloadManager : IPreloadManager
     public async Task<bool> PreloadAsync(string filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath)) return false;
-        if (_cache.ContainsKey(filePath)) return true;
 
-        if (_cache.Count >= MaxCacheSize)
-            EvictOldest();
+        long generation;
+        lock (_gate)
+        {
+            if (_disposed) return false;
+            if (_cache.ContainsKey(filePath))
+            {
+                TouchLruLocked(filePath);
+                return true;
+            }
+            generation = _generation;
+        }
 
         _logger.LogDebug("Preloading: {File}", System.IO.Path.GetFileName(filePath));
         int handle = await _audio.LoadAsync(filePath);
-        if (handle != 0 && handle != -1)
+        if (handle == 0 || handle == -1) return false;
+
+        int? evictedHandle = null;
+        bool stopLoaded = false;
+        lock (_gate)
         {
-            _cache[filePath] = handle;
-            return true;
+            if (_disposed || generation != _generation || _cache.ContainsKey(filePath))
+            {
+                stopLoaded = true;
+            }
+            else
+            {
+                if (_cache.Count >= MaxCacheSize)
+                    evictedHandle = EvictOldestLocked();
+                _cache[filePath] = handle;
+                _lruOrder.AddLast(filePath);
+            }
         }
-        return false;
+
+        if (stopLoaded)
+        {
+            _audio.Stop(handle);
+            return !_disposed && generation == _generation;
+        }
+        if (evictedHandle is int evicted and not 0 and not -1)
+            _audio.Stop(evicted);
+
+        return true;
     }
 
     public Task<int> GetPreloadedHandleAsync(string filePath)
     {
-        _cache.TryGetValue(filePath, out int handle);
-        if (handle != 0 && handle != -1) _cache.Remove(filePath); // consumed
-        return Task.FromResult(handle);
+        if (string.IsNullOrWhiteSpace(filePath)) return Task.FromResult(0);
+        lock (_gate)
+        {
+            if (_cache.Remove(filePath, out int handle))
+            {
+                _lruOrder.Remove(filePath);
+                return Task.FromResult(handle);
+            }
+        }
+        return Task.FromResult(0);
     }
 
     public void Clear()
     {
-        foreach (var h in _cache.Values)
+        List<int> handles;
+        lock (_gate)
+        {
+            _generation++;
+            handles = _cache.Values.ToList();
+            _cache.Clear();
+            _lruOrder.Clear();
+        }
+        foreach (var h in handles)
             _audio.Stop(h);
-        _cache.Clear();
     }
 
-    private void EvictOldest()
+    private void TouchLruLocked(string filePath)
     {
-        var first = _cache.First();
-        _audio.Stop(first.Value);
-        _cache.Remove(first.Key);
+        _lruOrder.Remove(filePath);
+        _lruOrder.AddLast(filePath);
+    }
+
+    private int? EvictOldestLocked()
+    {
+        if (_lruOrder.First is null) return null;
+        var oldestKey = _lruOrder.First.Value;
+        _lruOrder.RemoveFirst();
+        return _cache.Remove(oldestKey, out var handle) ? handle : null;
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
+        Clear();
     }
 }

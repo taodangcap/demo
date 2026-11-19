@@ -18,6 +18,7 @@ namespace ShowCuePlayer;
 public partial class App : Application
 {
     private IHost? _host;
+    private static readonly object CrashLogGate = new();
     private static readonly string LogDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShowCuePlayer", "Logs");
 
@@ -127,8 +128,11 @@ public partial class App : Application
         {
             var logDirectory = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ShowCuePlayer", "Logs");
-            System.IO.Directory.CreateDirectory(logDirectory);
-            System.IO.File.AppendAllText(System.IO.Path.Combine(logDirectory, "crash.log"), text);
+            lock (CrashLogGate)
+            {
+                System.IO.Directory.CreateDirectory(logDirectory);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(logDirectory, "crash.log"), text);
+            }
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

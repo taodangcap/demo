@@ -43,6 +43,7 @@ public partial class VideoWindow : Window
     private ulong? _activeKaraokeNavigationId;
     private long _localMediaOperationId;
     private TaskCompletionSource<bool>? _pendingLocalMediaStart;
+    private TaskCompletionSource<bool>? _transitionFadeTcs;
 
     public event EventHandler? EscapeRequested;
     public event EventHandler? ImageEnded;
@@ -74,12 +75,17 @@ public partial class VideoWindow : Window
             // A successfully loaded player is only READY, not PLAYING. Keep the
             // whole browser muted until the page explicitly reports a playing state.
             _isKaraokePlaying = false;
-            await ApplyKaraokeVolumeAsync();
-            if (_isFrozen && e.IsSuccess)
+            try
             {
-                _resumeKaraokeAfterFreeze = true;
-                PauseKaraokeMedia();
+                await ApplyKaraokeVolumeAsync();
+                if (_isFrozen && e.IsSuccess)
+                {
+                    _resumeKaraokeAfterFreeze = true;
+                    PauseKaraokeMedia();
+                }
             }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
         };
         Player.MediaEnded += Player_MediaEnded;
         SizeChanged += (_, _) => ScheduleProgramLayout();
@@ -244,7 +250,9 @@ public partial class VideoWindow : Window
     {
         targetOpacity = Math.Clamp(targetOpacity, 0, 1);
         durationSeconds = Math.Clamp(durationSeconds, 0, 5);
+        _transitionFadeTcs?.TrySetResult(false);
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _transitionFadeTcs = completion;
         TransitionMaskOverlay.Visibility = Visibility.Visible;
         var animation = new DoubleAnimation(
             TransitionMaskOverlay.Opacity,
@@ -252,6 +260,8 @@ public partial class VideoWindow : Window
             TimeSpan.FromSeconds(durationSeconds));
         animation.Completed += (_, _) =>
         {
+            if (ReferenceEquals(_transitionFadeTcs, completion))
+                _transitionFadeTcs = null;
             TransitionMaskOverlay.BeginAnimation(OpacityProperty, null);
             TransitionMaskOverlay.Opacity = targetOpacity;
             if (targetOpacity <= 0)
@@ -264,6 +274,8 @@ public partial class VideoWindow : Window
 
     public void ClearTransitionMask()
     {
+        _transitionFadeTcs?.TrySetResult(false);
+        _transitionFadeTcs = null;
         TransitionMaskOverlay.BeginAnimation(OpacityProperty, null);
         TransitionMaskOverlay.Opacity = 0;
         TransitionMaskOverlay.Visibility = Visibility.Collapsed;
@@ -552,11 +564,13 @@ public partial class VideoWindow : Window
                 "if(window.__scpAutoNext===false){" +
                 "e.stopImmediatePropagation();e.preventDefault();" +
                 "try{e.target.pause();}catch(_){}}},true);" +
-                "window.__scpMedia=function(){return Array.from(document.querySelectorAll('video,audio'))" +
+                "window.__scpMedia=function(){return Array.from(document.querySelectorAll('video'))" +
                 ".find(function(m){return Number.isFinite(m.duration)&&m.duration>0;});};" +
-                "window.setInterval(function(){try{var m=window.__scpMedia();" +
+                "if(!window.__scpProgressInterval){window.__scpProgressInterval=window.setInterval(function(){try{" +
+                "if(window.__scpNativeBridgeActive)return;" +
+                "var m=window.__scpMedia();" +
                 "if(m&&window.chrome&&window.chrome.webview){window.chrome.webview.postMessage(JSON.stringify({" +
-                "type:'karaoke',action:'progress',position:m.currentTime||0,duration:m.duration||0}));}}catch(_){}},500);" +
+                "type:'karaoke',action:'progress',position:m.currentTime||0,duration:m.duration||0}));}}catch(_){}},500);}" +
                 "})();");
             _karaokeHooksInstalled = true;
             await ApplyKaraokeAutoNextAsync();
@@ -789,9 +803,10 @@ public partial class VideoWindow : Window
             var muted = effectiveMuted ? "true" : "false";
             var percent = (_karaokeVolume * 100).ToString(System.Globalization.CultureInfo.InvariantCulture);
             core.IsMuted = effectiveMuted;
-            PostMessage($"{{\"type\":\"karaoke\",\"action\":\"volume\",\"value\":{percent}}}");
+            if (!effectiveMuted)
+                PostMessage($"{{\"type\":\"karaoke\",\"action\":\"volume\",\"value\":{percent}}}");
             PostMessage($"{{\"type\":\"karaoke\",\"action\":\"mute\",\"muted\":{muted}}}");
-            await core.ExecuteScriptAsync($"document.querySelectorAll('video,audio').forEach(e=>{{e.muted={muted};e.volume={value};}});");
+            await core.ExecuteScriptAsync($"document.querySelectorAll('video').forEach(e=>{{e.muted={muted};e.volume={value};}});");
         }
         catch { /* navigation in progress */ }
     }
@@ -802,6 +817,7 @@ public partial class VideoWindow : Window
         try { KaraokeWebView.CoreWebView2?.Stop(); } catch { /* ignore */ }
         _isKaraokeNavigating = false;
         KaraokeWebView.Visibility = Visibility.Collapsed;
+        Helpers.WebView2Performance.TrimMemoryWorkingSet(KaraokeWebView.CoreWebView2, lowMemory: true);
         _isKaraokePlaying = false;
         ShowIdle();
     }
@@ -1238,13 +1254,18 @@ public partial class VideoWindow : Window
             Width = 960;
             Height = 540;
             WindowState = WindowState.Normal;
-            // Center on primary screen
+            // Center on primary screen (convert physical pixels to WPF DIPs)
             var primaryScreen = System.Windows.Forms.Screen.PrimaryScreen
                                 ?? System.Windows.Forms.Screen.AllScreens.FirstOrDefault();
             if (primaryScreen is null) return;
             var area = primaryScreen.WorkingArea;
-            Left = area.Left + (area.Width - Width) / 2;
-            Top = area.Top + (area.Height - Height) / 2;
+            var dpi = VisualTreeHelper.GetDpi(this);
+            var areaLeft = area.Left / dpi.DpiScaleX;
+            var areaTop = area.Top / dpi.DpiScaleY;
+            var areaWidth = area.Width / dpi.DpiScaleX;
+            var areaHeight = area.Height / dpi.DpiScaleY;
+            Left = areaLeft + (areaWidth - Width) / 2;
+            Top = areaTop + (areaHeight - Height) / 2;
         };
         menu.Items.Add(fitItem);
 
@@ -1276,20 +1297,32 @@ public partial class VideoWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        CancelPendingLocalMediaStart();
+        _transitionFadeTcs?.TrySetResult(false);
+        _transitionFadeTcs = null;
         _imageTimer.Stop();
         _imageTimer.Tick -= OnImageTimerTick;
         Player.MediaEnded -= Player_MediaEnded;
+        try
+        {
+            Player.Stop();
+            Player.Close();
+            Player.Source = null;
+        }
+        catch { }
         try
         {
             if (KaraokeWebView.CoreWebView2 is { } core)
             {
                 core.WebMessageReceived -= OnKaraokeWebMessageReceived;
                 if (_processFailureHooked)
-                core.ProcessFailed -= OnKaraokeProcessFailed;
+                    core.ProcessFailed -= OnKaraokeProcessFailed;
             }
         }
         catch { }
         try { KaraokeWebView.Dispose(); } catch { }
+        _karaokeNavigationStartGate.Dispose();
+        _localMediaStartGate.Dispose();
         base.OnClosed(e);
     }
 }

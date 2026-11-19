@@ -8,6 +8,9 @@ namespace ShowCuePlayer.AudioEngine;
 /// </summary>
 public interface IAudioEngine : IDisposable
 {
+    /// <summary>Configure playback buffer length in milliseconds before or after initialization.</summary>
+    void ConfigureBuffer(int bufferMs);
+
     /// <summary>Initialize the audio engine with the configured output device.</summary>
     bool Initialize(int deviceIndex = -1);
 

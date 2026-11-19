@@ -8,7 +8,7 @@ WPF x64 application using Generic Host/DI, MVVM view models, a singleton Managed
 
 | Severity | Finding | Main files | Status |
 |---|---|---|---|
-| Critical | .NET 7 is out of support | `ShowCuePlayer.csproj` | Upgraded to .NET 10 |
+| Critical | .NET 7 is out of support | `ShowCuePlayer.csproj` | Upgraded to .NET 8 (LTS) |
 | High | Database used roaming AppData and had no schema version/backup | `DatabaseService.cs` | Fixed; legacy DB copied, schema versioned, backups created |
 | High | Crash handlers omitted unobserved tasks, exposed stack traces, and swallowed errors | `App.xaml.cs` | Fixed with daily LocalAppData logging and safe UI message |
 | High | Audio lifecycle/fades allowed races, invalid volumes and CTS leaks | `BassAudioEngine.cs`, `FadeEngine.cs` | Core lifecycle and fade ownership hardened; hardware stress test remains |

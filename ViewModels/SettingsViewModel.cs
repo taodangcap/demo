@@ -57,7 +57,13 @@ public sealed partial class SettingsViewModel : ObservableObject
         OutputDevices.Clear();
         foreach (var d in _audio.GetOutputDevices())
             OutputDevices.Add(d);
-        SelectedDevice = OutputDevices.FirstOrDefault(d => d.IsDefault)
+        var savedIndex = _settings.Current.AudioDeviceIndex;
+        var savedName = _settings.Current.AudioDeviceName;
+        SelectedDevice = OutputDevices.FirstOrDefault(d => d.Index == savedIndex)
+                         ?? (!string.IsNullOrWhiteSpace(savedName)
+                             ? OutputDevices.FirstOrDefault(d => string.Equals(d.Name, savedName, StringComparison.OrdinalIgnoreCase))
+                             : null)
+                         ?? OutputDevices.FirstOrDefault(d => d.IsDefault)
                          ?? OutputDevices.FirstOrDefault();
     }
 
@@ -162,7 +168,12 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             s.AudioDeviceIndex = SelectedDevice.Index;
             s.AudioDeviceName = SelectedDevice.Name;
+            if (_audio.CurrentDeviceIndex != SelectedDevice.Index)
+                _audio.SwitchDevice(SelectedDevice.Index);
         }
+
+        _audio.ConfigureBuffer(s.AudioBufferMs);
+        _audio.SetMasterVolume(MasterVolume);
 
         s.EnsureHotkeys();
         foreach (var item in HotkeyBindings)

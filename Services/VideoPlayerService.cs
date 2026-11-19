@@ -254,11 +254,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
 
             try
             {
-                double left = _videoWindow.Left;
-                double top = _videoWindow.Top;
-                double width = _videoWindow.ActualWidth;
-                double height = _videoWindow.ActualHeight;
-
+                int left, top, width, height;
                 if (!_isWindowedOutput && _targetScreen != null)
                 {
                     var bounds = _targetScreen.Bounds;
@@ -267,12 +263,22 @@ public sealed class VideoPlayerService : IVideoPlayerService
                     width = bounds.Width;
                     height = bounds.Height;
                 }
+                else
+                {
+                    var topLeft = _videoWindow.PointToScreen(new System.Windows.Point(0, 0));
+                    var bottomRight = _videoWindow.PointToScreen(
+                        new System.Windows.Point(_videoWindow.ActualWidth, _videoWindow.ActualHeight));
+                    left = (int)Math.Round(topLeft.X);
+                    top = (int)Math.Round(topLeft.Y);
+                    width = Math.Max(1, (int)Math.Round(bottomRight.X - topLeft.X));
+                    height = Math.Max(1, (int)Math.Round(bottomRight.Y - topLeft.Y));
+                }
 
-                using (var bmp = new System.Drawing.Bitmap((int)width, (int)height))
+                using (var bmp = new System.Drawing.Bitmap(width, height))
                 {
                     using (var g = System.Drawing.Graphics.FromImage(bmp))
                     {
-                        g.CopyFromScreen((int)left, (int)top, 0, 0, new System.Drawing.Size((int)width, (int)height));
+                        g.CopyFromScreen(left, top, 0, 0, new System.Drawing.Size(width, height));
                     }
 
                     string picturesPath = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
@@ -745,6 +751,7 @@ public sealed class VideoPlayerService : IVideoPlayerService
         try
         {
             var bounds = screen.Bounds;
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(window);
             if (!forceFullscreen && screen.Primary && window is VideoWindow)
             {
                 window.Topmost = false;
@@ -753,10 +760,12 @@ public sealed class VideoPlayerService : IVideoPlayerService
                 window.ShowInTaskbar = showInTaskbar;
                 window.ShowActivated = true;
                 window.WindowState = WindowState.Normal;
-                window.Width = Math.Min(960, bounds.Width * 0.8);
-                window.Height = Math.Min(540, bounds.Height * 0.8);
-                window.Left = bounds.Left + (bounds.Width - window.Width) / 2;
-                window.Top = bounds.Top + (bounds.Height - window.Height) / 2;
+                int widthPx = Math.Min((int)Math.Round(960 * dpi.DpiScaleX), (int)Math.Round(bounds.Width * 0.8));
+                int heightPx = Math.Min((int)Math.Round(540 * dpi.DpiScaleY), (int)Math.Round(bounds.Height * 0.8));
+                int leftPx = bounds.Left + (bounds.Width - widthPx) / 2;
+                int topPx = bounds.Top + (bounds.Height - heightPx) / 2;
+                var primaryHwnd = new WindowInteropHelper(window).EnsureHandle();
+                SetWindowPos(primaryHwnd, IntPtr.Zero, leftPx, topPx, widthPx, heightPx, SWP_NOACTIVATE | SWP_SHOWWINDOW);
                 if (window is VideoWindow primaryVideoWindow)
                     primaryVideoWindow.RefreshProgramLayout();
                 return;
@@ -797,8 +806,9 @@ public sealed class VideoPlayerService : IVideoPlayerService
         try
         {
             var area = screen.WorkingArea;
-            int width = Math.Min(preferredWidth, (int)(area.Width * 0.8));
-            int height = Math.Min(preferredHeight, (int)(area.Height * 0.8));
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(window);
+            int width = Math.Min((int)Math.Round(preferredWidth * dpi.DpiScaleX), (int)(area.Width * 0.8));
+            int height = Math.Min((int)Math.Round(preferredHeight * dpi.DpiScaleY), (int)(area.Height * 0.8));
             int left = area.Left + (area.Width - width) / 2;
             int top = area.Top + (area.Height - height) / 2;
 
@@ -827,11 +837,12 @@ public sealed class VideoPlayerService : IVideoPlayerService
         window.Left = -20000;
         window.Top = -20000;
 
-        // Use a standard screen size to prevent WebView2 / layout distortion
+        // Use a standard screen size to prevent WebView2 / layout distortion (in WPF DIPs)
         var targetScreen = Screen.AllScreens.Length > 1 ? Screen.AllScreens[1] : GetPrimaryScreen();
         var bounds = targetScreen.Bounds;
-        window.Width = bounds.Width > 0 ? bounds.Width : 1920;
-        window.Height = bounds.Height > 0 ? bounds.Height : 1080;
+        var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(window);
+        window.Width = bounds.Width > 0 ? bounds.Width / dpi.DpiScaleX : 1920;
+        window.Height = bounds.Height > 0 ? bounds.Height / dpi.DpiScaleY : 1080;
 
         window.WindowState = WindowState.Normal;
         if (window is VideoWindow offscreenVideoWindow)

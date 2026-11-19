@@ -15,10 +15,12 @@ public interface IFadeEngine
 /// Smooth, timer-based fade engine. Uses 10ms ticks for sample-accurate fading.
 /// Cancellable per-channel via CancellationToken.
 /// </summary>
-public sealed class FadeEngine : IFadeEngine
+public sealed class FadeEngine : IFadeEngine, IDisposable
 {
     private readonly ILogger<FadeEngine> _logger;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, CancellationTokenSource> _fades = new();
+    private readonly Dictionary<int, CancellationTokenSource> _fades = new();
+    private readonly object _gate = new();
+    private bool _disposed;
 
     public FadeEngine(ILogger<FadeEngine> logger) => _logger = logger;
 
@@ -30,9 +32,24 @@ public sealed class FadeEngine : IFadeEngine
 
     private async Task RunFadeAsync(int handle, double from, double to, double duration)
     {
-        CancelFade(handle);
-        var cts = new CancellationTokenSource();
-        _fades[handle] = cts;
+        if (duration <= 0)
+        {
+            CancelFade(handle);
+            Bass.ChannelSetAttribute(handle, ChannelAttribute.Volume, (float)Math.Clamp(to, 0, 1));
+            return;
+        }
+
+        CancellationTokenSource? cts = null;
+        CancellationToken token;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            if (_fades.Remove(handle, out var prev))
+                prev.Cancel();
+            cts = new CancellationTokenSource();
+            _fades[handle] = cts;
+            token = cts.Token;
+        }
 
         try
         {
@@ -43,28 +60,48 @@ public sealed class FadeEngine : IFadeEngine
 
             for (int i = 0; i < steps; i++)
             {
-                if (cts.Token.IsCancellationRequested) return;
+                if (token.IsCancellationRequested) return;
                 current += delta;
                 Bass.ChannelSetAttribute(handle, ChannelAttribute.Volume, (float)Math.Clamp(current, 0, 1));
-                await Task.Delay(tickMs, cts.Token);
+                await Task.Delay(tickMs, token);
             }
-            Bass.ChannelSetAttribute(handle, ChannelAttribute.Volume, (float)Math.Clamp(to, 0, 1));
+            if (!token.IsCancellationRequested)
+                Bass.ChannelSetAttribute(handle, ChannelAttribute.Volume, (float)Math.Clamp(to, 0, 1));
         }
         catch (OperationCanceledException) { /* intentional */ }
         catch (Exception ex) { _logger.LogError(ex, "Fade error on handle {H}", handle); }
         finally
         {
-            if (_fades.TryRemove(new KeyValuePair<int, CancellationTokenSource>(handle, cts)))
-                cts.Dispose();
+            lock (_gate)
+            {
+                if (cts is not null && _fades.TryGetValue(handle, out var current) && ReferenceEquals(current, cts))
+                    _fades.Remove(handle);
+            }
+            cts?.Dispose();
         }
     }
 
     public void CancelFade(int handle)
     {
-        if (_fades.TryRemove(handle, out var cts))
+        CancellationTokenSource? prev;
+        lock (_gate)
         {
-            cts.Cancel();
-            cts.Dispose();
+            _fades.Remove(handle, out prev);
         }
+        prev?.Cancel();
+    }
+
+    public void Dispose()
+    {
+        List<CancellationTokenSource> active;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            active = _fades.Values.ToList();
+            _fades.Clear();
+        }
+        foreach (var cts in active)
+            cts.Cancel();
     }
 }

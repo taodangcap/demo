@@ -7,7 +7,7 @@ dotnet publish ShowCuePlayer.csproj -c Release --no-restore -p:PublishProfile=Pr
 & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" "installer\ShowCuePlayer.iss"
 ```
 
-The installer is written to `installer-output\7zyx-Media-Setup-1.0.0-x64.exe`.
+The installer is written to `installer-output\7zyx-Media-Setup-1.0.10-x64.exe` (or pass `/DMyAppVersion=<version>` to `ISCC.exe`).
 
 ## Publish an OTA release on GitHub
 

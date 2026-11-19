@@ -4,7 +4,7 @@ Windows x64 WPF cue playback application for live audio, video/projector and kar
 
 ## Requirements and build
 
-- Windows x64 and the .NET 10 Desktop Runtime; the WebView2 Runtime is required for video/web output.
+- Windows x64 and the .NET 8 Desktop Runtime; the WebView2 Runtime is required for video/web output.
 - Build: `dotnet restore` then `dotnet build -c Release`.
 - Run: `dotnet run --project ShowCuePlayer.csproj -c Debug`.
 - Publish: `dotnet publish ShowCuePlayer.csproj -c Release -r win-x64 --self-contained false`.

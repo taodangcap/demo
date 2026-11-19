@@ -43,6 +43,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     private bool _videoEndHooked;
     private bool _crossfadeWindowFired;
     private bool _cueOutHandled;
+    private int _playGeneration;
 
     // ─── Backing model ────────────────────────────────────────────
     public CueModel Model { get; private set; }
@@ -693,6 +694,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
             return;
         }
 
+        int playGen = Interlocked.Increment(ref _playGeneration);
         UpdateStatus(CueStatus.Loading);
 
         // Prefer preloaded stream
@@ -705,9 +707,24 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
 
         if (handle == 0 || handle == -1)
         {
-            UpdateStatus(CueStatus.Error);
-            StatusText = "LOAD FAILED";
+            if (playGen == Volatile.Read(ref _playGeneration) && !_disposed)
+            {
+                UpdateStatus(CueStatus.Error);
+                StatusText = "LOAD FAILED";
+            }
             return;
+        }
+
+        if (playGen != Volatile.Read(ref _playGeneration) || _disposed)
+        {
+            _audio.Stop(handle);
+            return;
+        }
+
+        if (_handle != 0 && _handle != handle)
+        {
+            _audio.ChannelEnded -= OnChannelEnded;
+            _audio.Stop(_handle);
         }
 
         _handle = handle;
@@ -741,6 +758,8 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
         if (doFadeIn)
         {
             await _fade.FadeInAsync(_handle, 0, targetVol, Model.FadeInSeconds);
+            if (playGen != Volatile.Read(ref _playGeneration) || _disposed || !IsPlaying)
+                return;
             _isUpdatingVolume = true;
             Volume = targetVol;
             _isUpdatingVolume = false;
@@ -875,9 +894,11 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
 
     private void OnVideoMediaEnded(object? sender, Guid ownerId)
     {
-        Application.Current?.Dispatcher.Invoke(() =>
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+        dispatcher.BeginInvoke(() =>
         {
-            if (ownerId != Model.Id || !IsVideo || IsImage || _suppressNaturalEnd) return;
+            if (_disposed || ownerId != Model.Id || !IsVideo || IsImage || _suppressNaturalEnd) return;
             // Loop is handled inside VideoWindow — natural end only when not looping
             if (IsLoopPlaybackEnabled && RestartVideoLoopAtCueIn()) return;
             HandleNaturalEnd();
@@ -912,6 +933,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task StopAsync()
     {
+        Interlocked.Increment(ref _playGeneration);
         _suppressNaturalEnd = true;
         _audio.ChannelEnded -= OnChannelEnded;
         UnhookVideoEnd();
@@ -945,9 +967,11 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     private void OnChannelEnded(object? sender, int handle)
     {
         if (handle != _handle) return;
-        Application.Current?.Dispatcher.Invoke(() =>
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+        dispatcher.BeginInvoke(() =>
         {
-            if (_suppressNaturalEnd) return;
+            if (_disposed || handle != _handle || _suppressNaturalEnd) return;
             // Bass loop mode should not fire end; if it does, ignore when looping
             if (IsLoopPlaybackEnabled && RestartAudioLoopAtCueIn()) return;
             HandleNaturalEnd();
@@ -1303,6 +1327,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        Interlocked.Increment(ref _playGeneration);
         Interlocked.Increment(ref _mixerThumbnailLoadVersion);
         _timer.Stop();
         _timer.Tick -= OnTimerTick;
@@ -1326,7 +1351,7 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (TryParseHotkey(newValue, out var key, out var modifiers))
+        if (HotkeyUtil.TryParse(newValue, out var key, out var modifiers))
         {
             bool ok = _hotkeys.Register(Model.Id, newValue, key, modifiers);
             if (!ok)
@@ -1334,40 +1359,10 @@ public sealed partial class CueCardViewModel : ObservableObject, IDisposable
                 System.Windows.MessageBox.Show($"Hotkey '{newValue}' conflict with another cue card!", "Conflict",
                     System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
 
-                System.Windows.Application.Current.Dispatcher.BeginInvoke(() => {
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => {
                     HotkeyText = oldValue ?? string.Empty;
                 });
             }
         }
-    }
-
-    private bool TryParseHotkey(string hotkeyText, out Key key, out ModifierKeys modifiers)
-    {
-        key = Key.None;
-        modifiers = ModifierKeys.None;
-        if (string.IsNullOrEmpty(hotkeyText)) return false;
-
-        var parts = hotkeyText.Split('+');
-        for (int i = 0; i < parts.Length; i++)
-        {
-            var part = parts[i].Trim();
-            if (part.Equals("Ctrl", System.StringComparison.OrdinalIgnoreCase))
-                modifiers |= ModifierKeys.Control;
-            else if (part.Equals("Shift", System.StringComparison.OrdinalIgnoreCase))
-                modifiers |= ModifierKeys.Shift;
-            else if (part.Equals("Alt", System.StringComparison.OrdinalIgnoreCase))
-                modifiers |= ModifierKeys.Alt;
-            else if (part.Equals("Win", System.StringComparison.OrdinalIgnoreCase))
-                modifiers |= ModifierKeys.Windows;
-            else
-            {
-                if (System.Enum.TryParse<Key>(part, true, out var parsedKey))
-                {
-                    key = parsedKey;
-                }
-            }
-        }
-
-        return key != Key.None;
     }
 }

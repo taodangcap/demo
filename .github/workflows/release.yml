@@ -11,22 +11,16 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: demo
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: |
-            7.0.x
-            10.0.x
+          dotnet-version: 8.0.x
 
       - name: Read version from tag
         id: version
         shell: pwsh
-        working-directory: .
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release tag: $version" }

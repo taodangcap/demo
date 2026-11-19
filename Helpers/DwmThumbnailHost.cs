@@ -18,6 +18,7 @@ public sealed class DwmThumbnailHost : FrameworkElement
     public bool HasThumbnail => _thumbnail != IntPtr.Zero;
     public int? LastHResult { get; private set; }
     public bool PreserveAspectRatio { get; set; } = true;
+    public event EventHandler? ThumbnailFailed;
 
     public DwmThumbnailHost()
     {
@@ -112,7 +113,10 @@ public sealed class DwmThumbnailHost : FrameworkElement
             };
             LastHResult = DwmUpdateThumbnailProperties(_thumbnail, ref properties);
             if (LastHResult != 0)
+            {
                 UnregisterThumbnail();
+                ThumbnailFailed?.Invoke(this, EventArgs.Empty);
+            }
         }
         catch
         {
@@ -155,7 +159,10 @@ public sealed class DwmThumbnailHost : FrameworkElement
         _destinationHwnd = destinationHwnd;
         LastHResult = DwmRegisterThumbnail(_destinationHwnd, _sourceHwnd, out _thumbnail);
         if (LastHResult != 0)
+        {
             _thumbnail = IntPtr.Zero;
+            ThumbnailFailed?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void UnregisterThumbnail()

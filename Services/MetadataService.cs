@@ -79,13 +79,7 @@ public sealed class MetadataService : IMetadataService
             meta.Channels = props.AudioChannels;
             meta.Codec = props.Description;
 
-            // Album art
-            var pic = tag.Pictures?.FirstOrDefault();
-            if (pic is not null)
-            {
-                meta.AlbumArtData = pic.Data.Data;
-                meta.AlbumArtMimeType = pic.MimeType;
-            }
+            // Embedded album art is not rendered in the UI; skip decoding picture blobs to save RAM during batch imports.
         }
         catch
         {

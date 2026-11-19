@@ -28,17 +28,21 @@ public sealed class HotkeyService : IHotkeyService
     private readonly ILogger<HotkeyService> _logger;
     private readonly List<HotkeyRegistration> _registrations = new List<HotkeyRegistration>();
     private readonly HashSet<Key> _pressedKeys = new();
+    private readonly object _sync = new();
     private nint _hookHandle;
     private readonly NativeMethods.LowLevelKeyboardProc _proc;
     private bool _isSuspended;
     public bool IsSuspended
     {
-        get => _isSuspended;
+        get { lock (_sync) return _isSuspended; }
         set
         {
-            _isSuspended = value;
-            if (value)
-                _pressedKeys.Clear();
+            lock (_sync)
+            {
+                _isSuspended = value;
+                if (value)
+                    _pressedKeys.Clear();
+            }
         }
     }
 
@@ -50,51 +54,88 @@ public sealed class HotkeyService : IHotkeyService
         _proc = HookCallback;
         _hookHandle = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _proc,
             NativeMethods.GetModuleHandle(null), 0);
-        _logger.LogInformation("Global keyboard hook installed: {Handle}", _hookHandle);
+        if (_hookHandle == nint.Zero)
+            _logger.LogWarning("Failed to install global keyboard hook (Win32 error {Error})",
+                Marshal.GetLastWin32Error());
+        else
+            _logger.LogInformation("Global keyboard hook installed: {Handle}", _hookHandle);
     }
 
     public bool Register(Guid cueId, string hotkeyText, Key key, ModifierKeys modifiers)
     {
-        if (HasConflict(key, modifiers, cueId)) return false;
-        Unregister(cueId);
-        _registrations.Add(new HotkeyRegistration(cueId, hotkeyText, key, modifiers));
-        return true;
+        lock (_sync)
+        {
+            if (HasConflictLocked(key, modifiers, cueId)) return false;
+            _registrations.RemoveAll(r => r.CueId == cueId);
+            _registrations.Add(new HotkeyRegistration(cueId, hotkeyText, key, modifiers));
+            return true;
+        }
     }
 
     public void Unregister(Guid cueId)
-        => _registrations.RemoveAll(r => r.CueId == cueId);
+    {
+        lock (_sync)
+            _registrations.RemoveAll(r => r.CueId == cueId);
+    }
 
     public bool HasConflict(Key key, ModifierKeys modifiers, Guid? excludeCueId = null)
+    {
+        lock (_sync)
+            return HasConflictLocked(key, modifiers, excludeCueId);
+    }
+
+    private bool HasConflictLocked(Key key, ModifierKeys modifiers, Guid? excludeCueId)
         => _registrations.Any(r =>
             r.Key == key && r.Modifiers == modifiers &&
             (excludeCueId == null || r.CueId != excludeCueId));
 
-    public IReadOnlyList<HotkeyRegistration> GetAll() => _registrations.AsReadOnly();
+    public IReadOnlyList<HotkeyRegistration> GetAll()
+    {
+        lock (_sync)
+            return _registrations.ToList().AsReadOnly();
+    }
 
     private nint HookCallback(int nCode, nint wParam, nint lParam)
     {
         if (nCode >= 0)
         {
             var kbStruct = Marshal.PtrToStructure<NativeMethods.KBDLLHOOKSTRUCT>(lParam);
-            var key = KeyInterop.KeyFromVirtualKey((int)kbStruct.vkCode);
-            if (wParam == NativeMethods.WM_KEYUP || wParam == NativeMethods.WM_SYSKEYUP)
+            int vk = (int)kbStruct.vkCode;
+            var key = KeyInterop.KeyFromVirtualKey(vk);
+            Guid? matchedCueId = null;
+
+            lock (_sync)
             {
-                _pressedKeys.Remove(key);
-            }
-            else if (!IsSuspended
-                     && (wParam == NativeMethods.WM_KEYDOWN || wParam == NativeMethods.WM_SYSKEYDOWN)
-                     && _pressedKeys.Add(key))
-            {
-                var modifiers = GetCurrentModifiers();
-                foreach (var reg in _registrations)
+                if (wParam == NativeMethods.WM_KEYUP || wParam == NativeMethods.WM_SYSKEYUP)
                 {
-                    if (reg.Key == key && reg.Modifiers == modifiers)
+                    _pressedKeys.Remove(key);
+                }
+                else if (!_isSuspended
+                         && (wParam == NativeMethods.WM_KEYDOWN || wParam == NativeMethods.WM_SYSKEYDOWN))
+                {
+                    // Guard against UIPI swallowing WM_KEYUP from elevated windows.
+                    if (_pressedKeys.Contains(key) && NativeMethods.GetAsyncKeyState(vk) >= 0)
+                        _pressedKeys.Remove(key);
+
+                    if (_pressedKeys.Add(key))
                     {
-                        System.Windows.Application.Current?.Dispatcher.InvokeAsync(
-                            () => HotkeyPressed?.Invoke(this, reg.CueId));
-                        break;
+                        var modifiers = GetCurrentModifiers();
+                        foreach (var reg in _registrations)
+                        {
+                            if (reg.Key == key && reg.Modifiers == modifiers)
+                            {
+                                matchedCueId = reg.CueId;
+                                break;
+                            }
+                        }
                     }
                 }
+            }
+
+            if (matchedCueId is Guid cueId)
+            {
+                System.Windows.Application.Current?.Dispatcher.InvokeAsync(
+                    () => HotkeyPressed?.Invoke(this, cueId));
             }
         }
         return NativeMethods.CallNextHookEx(_hookHandle, nCode, wParam, lParam);

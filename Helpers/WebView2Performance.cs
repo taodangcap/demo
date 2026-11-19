@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.CompilerServices;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
@@ -12,13 +13,11 @@ public static class WebView2Performance
 {
     private static CoreWebView2Environment? _outputEnv;
     private static readonly SemaphoreSlim EnvLock = new(1, 1);
+    private static readonly ConditionalWeakTable<CoreWebView2, object> ConfiguredCores = new();
 
     /// <summary>
     /// Flags chống throttle + ưu tiên GPU decode/raster — quan trọng cho màn OUTPUT không focus.
     /// </summary>
-    public const string ChromeUserAgent =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
-
     public const string BrowserArgs =
         "--autoplay-policy=no-user-gesture-required " +
         "--disable-background-timer-throttling " +
@@ -33,7 +32,7 @@ public static class WebView2Performance
     {
         if (_outputEnv is not null) return _outputEnv;
 
-        await EnvLock.WaitAsync().ConfigureAwait(false);
+        await EnvLock.WaitAsync().ConfigureAwait(true);
         try
         {
             if (_outputEnv is not null) return _outputEnv;
@@ -94,16 +93,19 @@ public static class WebView2Performance
         }
         catch { /* older runtime */ }
 
-        try
+        if (!ConfiguredCores.TryGetValue(core, out _))
         {
-            core.AddWebResourceRequestedFilter("https://*.youtube.com/*", CoreWebView2WebResourceContext.All);
-            core.AddWebResourceRequestedFilter("https://*.youtube-nocookie.com/*", CoreWebView2WebResourceContext.All);
-            core.AddWebResourceRequestedFilter("https://*.googlevideo.com/*", CoreWebView2WebResourceContext.All);
+            ConfiguredCores.Add(core, new object());
+            try
+            {
+                core.AddWebResourceRequestedFilter("https://*.youtube.com/*", CoreWebView2WebResourceContext.All);
+                core.AddWebResourceRequestedFilter("https://*.youtube-nocookie.com/*", CoreWebView2WebResourceContext.All);
+                core.AddWebResourceRequestedFilter("https://*.googlevideo.com/*", CoreWebView2WebResourceContext.All);
 
-            core.WebResourceRequested -= OnWebResourceRequested;
-            core.WebResourceRequested += OnWebResourceRequested;
+                core.WebResourceRequested += OnWebResourceRequested;
+            }
+            catch { /* ignore */ }
         }
-        catch { /* ignore */ }
 
         try { core.IsMuted = false; }
         catch { /* ignore */ }

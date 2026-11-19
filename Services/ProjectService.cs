@@ -15,9 +15,10 @@ public interface IProjectService
     event EventHandler ProjectChanged;
 }
 
-public sealed class ProjectService : IProjectService
+public sealed class ProjectService : IProjectService, IDisposable
 {
     private readonly SemaphoreSlim _saveLock = new(1, 1);
+    private bool _disposed;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -40,12 +41,31 @@ public sealed class ProjectService : IProjectService
     public async Task<ProjectModel?> OpenAsync(string filePath)
     {
         if (!File.Exists(filePath)) return null;
-        var json = await File.ReadAllTextAsync(filePath);
-        var project = JsonSerializer.Deserialize<ProjectModel>(json, JsonOptions);
-        if (project is null) return null;
-        project.FilePath = filePath;
-        Current = project;
-        CurrentFilePath = filePath;
+        await _saveLock.WaitAsync();
+        try
+        {
+            var json = await File.ReadAllTextAsync(filePath);
+            ProjectModel? project;
+            try
+            {
+                project = JsonSerializer.Deserialize<ProjectModel>(json, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+            if (project is null) return null;
+            project.Cues ??= new List<CueModel>();
+            project.Playlists ??= new List<PlaylistModel>();
+            project.Settings?.Validate();
+            project.FilePath = filePath;
+            Current = project;
+            CurrentFilePath = filePath;
+        }
+        finally
+        {
+            _saveLock.Release();
+        }
         ProjectChanged?.Invoke(this, EventArgs.Empty);
         return Current;
     }
@@ -62,31 +82,38 @@ public sealed class ProjectService : IProjectService
         await _saveLock.WaitAsync();
         try
         {
-        Current.DateModified = DateTime.UtcNow;
-        Current.FilePath = filePath;
-        var json = JsonSerializer.Serialize(Current, JsonOptions);
-        var fullPath = Path.GetFullPath(filePath);
-        var directory = Path.GetDirectoryName(fullPath)
-            ?? throw new InvalidOperationException("Project path has no parent directory.");
-        Directory.CreateDirectory(directory);
+            Current.DateModified = DateTime.UtcNow;
+            Current.FilePath = filePath;
+            var json = JsonSerializer.Serialize(Current, JsonOptions);
+            var fullPath = Path.GetFullPath(filePath);
+            var directory = Path.GetDirectoryName(fullPath)
+                ?? throw new InvalidOperationException("Project path has no parent directory.");
+            Directory.CreateDirectory(directory);
 
-        var tempPath = Path.Combine(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            await File.WriteAllTextAsync(tempPath, json);
-            File.Move(tempPath, fullPath, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-                File.Delete(tempPath);
-        }
+            var tempPath = Path.Combine(directory, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await File.WriteAllTextAsync(tempPath, json);
+                File.Move(tempPath, fullPath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                    File.Delete(tempPath);
+            }
 
-        CurrentFilePath = filePath;
+            CurrentFilePath = filePath;
         }
         finally
         {
             _saveLock.Release();
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _saveLock.Dispose();
     }
 }

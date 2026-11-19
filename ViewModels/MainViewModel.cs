@@ -44,7 +44,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private CueCardViewModel? _lastPlayedCue;
     private bool _loadingLedSettings;
     private bool _reloadingVideoScreens;
+    private bool _suppressVideoScreenSave;
 
+    public Task InitializationTask { get; }
     public ISettingsService Settings { get; }
     public IVideoPlayerService VideoPlayer => _videoPlayer;
     public IAudioEngine AudioEngine => _audio;
@@ -234,10 +236,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _nowNextTimer.Start();
 
         _videoPlayer.OutputStateChanged += OnVideoOutputStateChanged;
+        Settings.SettingsChanged += OnSettingsServiceChanged;
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         LoadVideoScreens();
-        _ = InitializeAsync();
+        InitializationTask = InitializeAsync();
+    }
+
+    private void OnSettingsServiceChanged(object? sender, EventArgs e)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+        void Apply()
+        {
+            var s = Settings.Current;
+            if (Math.Abs(MasterVolume - s.MasterVolume) > 0.001)
+                MasterVolume = s.MasterVolume;
+            if (s.AutoSaveEnabled && !_autoSaveTimer.IsEnabled)
+                _autoSaveTimer.Start();
+            else if (!s.AutoSaveEnabled && _autoSaveTimer.IsEnabled)
+                _autoSaveTimer.Stop();
+        }
+        if (dispatcher.CheckAccess()) Apply();
+        else dispatcher.BeginInvoke(Apply);
     }
 
     private void LoadVideoScreens()
@@ -313,14 +334,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            // Never fall back to fullscreen on the operator monitor when a projector is unplugged.
+            // Never fall back to fullscreen on the operator monitor when a projector is unplugged,
+            // and keep the user's preferred external VideoOutputDeviceName intact for reconnect.
             var primary = VideoScreens.FirstOrDefault(screen => screen.IsPrimary)
                 ?? VideoScreens.FirstOrDefault();
             if (primary is null)
                 return;
 
             _videoPlayer.SetWindowedOutput(true, primary.Screen);
-            SelectedVideoScreen = primary;
+            _suppressVideoScreenSave = true;
+            try
+            {
+                SelectedVideoScreen = primary;
+            }
+            finally
+            {
+                _suppressVideoScreenSave = false;
+            }
             ProgramOutputModeText = $"{primary.ShortName} · WINDOW";
             StatusMessage = "⚠ Mất màn đang chiếu · PROGRAM đã thu về Màn 1 dạng cửa sổ";
         });
@@ -355,7 +385,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 _videoPlayer.SetTargetScreen(value.Screen, forceFullscreen: _videoPlayer.IsOutputArmed);
             }
         }
-        if (value is not null)
+        if (value is not null && !_reloadingVideoScreens && !_suppressVideoScreenSave)
         {
             Settings.Current.VideoOutputDeviceName = value.DeviceName;
             _ = Settings.SaveAsync();
@@ -387,11 +417,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnVideoOutputStateChanged(object? sender, EventArgs e)
     {
-        Application.Current?.Dispatcher.Invoke(() =>
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+        dispatcher.BeginInvoke(() =>
         {
             if (!_videoPlayer.IsOutputArmed)
             {
                 IsVideoOutputEnabled = false;
+                if (IsKaraokeOutputOn)
+                {
+                    IsKaraokeOutputOn = false;
+                    IsMixerKaraokeProgram = false;
+                    KaraokeMasterReady = false;
+                    KaraokeNowTitle = "—";
+                    ProgramOutputModeText = "ĐÃ TẮT";
+                    RefreshKaraokeStatusUi();
+                }
             }
             IsOutputPlaying = _videoPlayer.IsPlaying;
             IsLedBlackout = _videoPlayer.IsBlackout;
@@ -434,6 +475,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async Task InitializeAsync()
     {
         await Settings.LoadAsync();
+        _audio.ConfigureBuffer(Settings.Current.AudioBufferMs);
         MasterVolume = Settings.Current.MasterVolume;
         AudioBusVolume = Settings.Current.AudioBusVolume;
         VideoBusVolume = Settings.Current.VideoBusVolume;
@@ -1348,7 +1390,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Settings.Current.KaraokeDefaultPassword = pwd;
         _ = Settings.SaveDebouncedAsync();
         RebuildKaraokeUrls();
-        KaraokeUrlsChanged?.Invoke(this, EventArgs.Empty);
+        if (IsKaraokeOutputOn)
+            StatusMessage = "Đã thay đổi mã PIN · bấm SYNC để áp dụng lên màn chiếu";
     }
 
     partial void OnKaraokeDefaultSessionIdChanged(string value)
@@ -1386,15 +1429,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 session = sid;
         }
 
-        if (baseRemote.Contains("session=", StringComparison.OrdinalIgnoreCase))
-        {
-            var idx = baseRemote.IndexOf("session=", StringComparison.OrdinalIgnoreCase);
-            KaraokeRemoteUrl = baseRemote[..(idx + "session=".Length)] + Uri.EscapeDataString(session);
-        }
-        else
-        {
-            KaraokeRemoteUrl = AppendOrReplaceQuery(baseRemote, "session", session);
-        }
+        var remoteBase = StripQueryParams(
+            baseRemote,
+            "session", "token", "op", "operator", "host", "embed", "ui", "layout", "autonext", "pwd", "pin");
+        KaraokeRemoteUrl = AppendOrReplaceQuery(remoteBase, "session", session);
 
         // Operator desk flags — KTV remote ẩn QR/share khi embed ShowCue
         if (!string.IsNullOrEmpty(session))
@@ -3165,14 +3203,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             proj.Playlists.Add(new PlaylistModel { Name = "Main Music" });
         }
 
+        bool isFirstPlaylist = true;
         foreach (var pModel in proj.Playlists)
         {
             var pvm = new PlaylistViewModel(pModel);
             var cuesForPlaylist = proj.Cues
-                .Where(c => c.PlaylistId == pModel.Id.ToString() || string.IsNullOrEmpty(c.PlaylistId))
+                .Where(c => c.PlaylistId == pModel.Id.ToString()
+                            || (isFirstPlaylist && string.IsNullOrEmpty(c.PlaylistId)))
                 .OrderBy(c => c.SortOrder)
                 .ToList();
-                
+            isFirstPlaylist = false;
+
             foreach (var cue in cuesForPlaylist)
             {
                 cue.PlaylistId = pModel.Id.ToString(); // Upgrade old projects
@@ -3469,6 +3510,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SleepPreventer.SetActive(false);
         _hotkeys.HotkeyPressed -= OnHotkeyPressed;
         _videoPlayer.OutputStateChanged -= OnVideoOutputStateChanged;
+        Settings.SettingsChanged -= OnSettingsServiceChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         foreach (var p in Playlists)
             foreach (var c in p.Cues)
@@ -3480,5 +3522,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 c.Dispose();
             }
         _preload.Clear();
+        _importGate.Dispose();
+        _mixerTakeGate.Dispose();
     }
 }

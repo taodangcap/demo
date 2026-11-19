@@ -2,7 +2,7 @@
 
 ## Changed
 
-- Targeted .NET 10 Windows x64 and upgraded Microsoft.Extensions, SQLite, WebView2 and CommunityToolkit packages.
+- Targeted .NET 8 Windows x64 (LTS) and upgraded Microsoft.Extensions, SQLite, WebView2 and CommunityToolkit packages.
 - Added daily file logging, three global exception paths, safer shutdown logging and user-friendly fatal error text.
 - Moved new database storage to LocalAppData, preserved the roaming legacy database, added schema versioning and pre-migration/corruption backups.
 - Added settings validation, corrupt JSON recovery, finite volume/fade checks and hotkey normalization.
@@ -18,4 +18,4 @@
 
 ## Manual test checklist
 
-Launch the app; import audio; Play/Pause/Resume/Stop; switch cues rapidly; switch audio output; open/close projector on each monitor; disconnect the output monitor; close while playing; restart and verify project/settings; inspect `%LocalAppData%\ShowCuePlayer\Logs` for unhandled exceptions and verify all three BASS DLLs beside the Release executable.
+Launch the app; import audio; Play/Pause/Resume/Stop; switch cues rapidly; switch audio output; open/close projector on each monitor; disconnect the output monitor; close while playing; restart and verify project/settings; inspect `%LocalAppData%\ShowCuePlayer\Logs` for unhandled exceptions and verify `bass.dll` beside the Release executable.

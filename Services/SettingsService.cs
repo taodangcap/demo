@@ -16,7 +16,9 @@ public sealed class SettingsService : ISettingsService, IDisposable
 {
     private readonly Database.Repositories.ISettingsRepository _repo;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
+    private readonly object _debounceGate = new();
     private CancellationTokenSource? _debounceCts;
+    private bool _disposed;
     public AppSettings Current { get; private set; } = new();
     public event EventHandler? SettingsChanged;
 
@@ -31,38 +33,45 @@ public sealed class SettingsService : ISettingsService, IDisposable
 
     public async Task SaveAsync()
     {
+        if (_disposed) return;
         CancelPendingDebounce();
         await _saveLock.WaitAsync();
         try
         {
+            if (_disposed) return;
             await _repo.SaveAsync(Current);
-            SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
         finally
         {
             _saveLock.Release();
         }
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public Task SaveDebouncedAsync(int delayMs = 400)
     {
-        CancelPendingDebounce();
-        var cts = new CancellationTokenSource();
-        _debounceCts = cts;
+        CancellationTokenSource cts;
+        CancellationToken token;
+        lock (_debounceGate)
+        {
+            if (_disposed) return Task.CompletedTask;
+            _debounceCts?.Cancel();
+            cts = new CancellationTokenSource();
+            _debounceCts = cts;
+            token = cts.Token;
+        }
 
         _ = Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(delayMs, cts.Token);
-                if (!cts.Token.IsCancellationRequested)
-                {
+                await Task.Delay(delayMs, token);
+                if (!token.IsCancellationRequested && !_disposed)
                     await SaveAsync();
-                }
             }
             catch (OperationCanceledException)
             {
-                // Expected when new keystroke cancels previous
+                // Expected when new change supersedes previous debounce
             }
             catch (Exception ex)
             {
@@ -70,9 +79,10 @@ public sealed class SettingsService : ISettingsService, IDisposable
             }
             finally
             {
-                if (ReferenceEquals(_debounceCts, cts))
+                lock (_debounceGate)
                 {
-                    _debounceCts = null;
+                    if (ReferenceEquals(_debounceCts, cts))
+                        _debounceCts = null;
                 }
                 cts.Dispose();
             }
@@ -83,23 +93,30 @@ public sealed class SettingsService : ISettingsService, IDisposable
 
     private void CancelPendingDebounce()
     {
-        var prev = Interlocked.Exchange(ref _debounceCts, null);
-        if (prev != null)
+        CancellationTokenSource? prev;
+        lock (_debounceGate)
         {
-            try
-            {
-                prev.Cancel();
-                prev.Dispose();
-            }
-            catch
-            {
-                // Ignore disposal exceptions
-            }
+            prev = _debounceCts;
+            _debounceCts = null;
+        }
+        if (prev is null) return;
+        try
+        {
+            prev.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Task already completed and disposed this CTS
         }
     }
 
     public void Dispose()
     {
+        lock (_debounceGate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
         CancelPendingDebounce();
         _saveLock.Dispose();
     }

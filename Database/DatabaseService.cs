@@ -17,7 +17,7 @@ public interface IDatabaseService
 /// </summary>
 public sealed class DatabaseService : IDatabaseService
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
     private readonly ILogger<DatabaseService> _logger;
     public string DatabasePath { get; }
 
@@ -31,13 +31,26 @@ public sealed class DatabaseService : IDatabaseService
         MigrateLegacyDatabase(DatabasePath);
     }
 
+    private DatabaseService(ILogger<DatabaseService> logger, string databasePath)
+    {
+        _logger = logger;
+        var dir = Path.GetDirectoryName(databasePath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+        DatabasePath = databasePath;
+    }
+
+    /// <summary>Creates a database service isolated to an explicit SQLite file path.</summary>
+    public static DatabaseService CreateForPath(ILogger<DatabaseService> logger, string databasePath)
+        => new(logger, databasePath);
+
     public SqliteConnection GetConnection()
     {
         var builder = new SqliteConnectionStringBuilder { DataSource = DatabasePath, DefaultTimeout = 15 };
         var conn = new SqliteConnection(builder.ToString());
         conn.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;";
+        cmd.CommandText = "PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
         cmd.ExecuteNonQuery();
         return conn;
     }
@@ -48,84 +61,38 @@ public sealed class DatabaseService : IDatabaseService
         try
         {
             await using var conn = GetConnection();
+            await ExecuteAsync(conn, "PRAGMA journal_mode=WAL;");
             var version = await GetSchemaVersionAsync(conn);
-            if (version < CurrentSchemaVersion && File.Exists(DatabasePath))
-                File.Copy(DatabasePath, $"{DatabasePath}.backup-{DateTime.UtcNow:yyyyMMddHHmmss}", false);
+            if (version > 0 && version < CurrentSchemaVersion && File.Exists(DatabasePath))
+            {
+                await ExecuteAsync(conn, "PRAGMA wal_checkpoint(TRUNCATE);");
+                var suffix = Guid.NewGuid().ToString("N")[..6];
+                File.Copy(DatabasePath, $"{DatabasePath}.backup-{DateTime.UtcNow:yyyyMMddHHmmss}-{suffix}", false);
+            }
 
             await ExecuteAsync(conn, @"
-            CREATE TABLE IF NOT EXISTS Projects (
-                Id TEXT PRIMARY KEY,
-                Name TEXT NOT NULL,
-                FilePath TEXT,
-                DateCreated TEXT NOT NULL,
-                DateModified TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS Cues (
-                Id TEXT PRIMARY KEY,
-                ProjectId TEXT,
-                SortOrder INTEGER NOT NULL DEFAULT 0,
-                Title TEXT NOT NULL,
-                Artist TEXT,
-                Album TEXT,
-                FilePath TEXT NOT NULL,
-                Volume REAL NOT NULL DEFAULT 1.0,
-                Duration REAL NOT NULL DEFAULT 0,
-                IsLooping INTEGER NOT NULL DEFAULT 0,
-                IsRepeating INTEGER NOT NULL DEFAULT 0,
-                PlaybackMode INTEGER NOT NULL DEFAULT 0,
-                HotkeyText TEXT,
-                ColorHex TEXT NOT NULL DEFAULT '#6C63FF',
-                Notes TEXT,
-                FadeInSeconds REAL NOT NULL DEFAULT 0,
-                FadeOutSeconds REAL NOT NULL DEFAULT 0,
-                CueInPoint REAL NOT NULL DEFAULT 0,
-                CueOutPoint REAL NOT NULL DEFAULT 0,
-                CrossfadeSeconds REAL NOT NULL DEFAULT 0,
-                PlaylistId TEXT,
-                DateAdded TEXT NOT NULL,
-                LastPlayed TEXT,
-                PlayCount INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY(ProjectId) REFERENCES Projects(Id)
-            );
-
-            CREATE TABLE IF NOT EXISTS Playlists (
-                Id TEXT PRIMARY KEY,
-                ProjectId TEXT,
-                Name TEXT NOT NULL,
-                ColorHex TEXT NOT NULL DEFAULT '#6C63FF',
-                IsShuffled INTEGER NOT NULL DEFAULT 0,
-                IsLooping INTEGER NOT NULL DEFAULT 0,
-                CurrentIndex INTEGER NOT NULL DEFAULT 0,
-                CueIds TEXT NOT NULL DEFAULT '[]',
-                DateCreated TEXT NOT NULL,
-                DateModified TEXT NOT NULL,
-                FOREIGN KEY(ProjectId) REFERENCES Projects(Id)
-            );
-
             CREATE TABLE IF NOT EXISTS Settings (
                 Key TEXT PRIMARY KEY,
                 Value TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS RecentFiles (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                FilePath TEXT NOT NULL UNIQUE,
-                LastAccessed TEXT NOT NULL,
-                AccessCount INTEGER NOT NULL DEFAULT 1
-            );
-
             CREATE TABLE IF NOT EXISTS SchemaInfo (
                 Version INTEGER NOT NULL
             );
-
-            CREATE INDEX IF NOT EXISTS idx_cues_project ON Cues(ProjectId);
-            CREATE INDEX IF NOT EXISTS idx_cues_sort ON Cues(SortOrder);
-            CREATE INDEX IF NOT EXISTS idx_playlists_project ON Playlists(ProjectId);
             ");
 
             if (version < CurrentSchemaVersion)
             {
+                // Retire unused legacy project/cue/playlist/recent-file tables removed in v2.
+                await ExecuteAsync(conn, @"
+                DROP INDEX IF EXISTS idx_cues_project;
+                DROP INDEX IF EXISTS idx_cues_sort;
+                DROP INDEX IF EXISTS idx_playlists_project;
+                DROP TABLE IF EXISTS Cues;
+                DROP TABLE IF EXISTS Playlists;
+                DROP TABLE IF EXISTS Projects;
+                DROP TABLE IF EXISTS RecentFiles;
+                ");
                 await ExecuteAsync(conn, $"DELETE FROM SchemaInfo; INSERT INTO SchemaInfo(Version) VALUES({CurrentSchemaVersion});");
             }
 
@@ -170,7 +137,7 @@ public sealed class DatabaseService : IDatabaseService
         try
         {
             if (File.Exists(DatabasePath))
-                File.Copy(DatabasePath, $"{DatabasePath}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}", false);
+                File.Copy(DatabasePath, $"{DatabasePath}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..6]}", false);
         }
         catch (Exception backupError) when (backupError is IOException or UnauthorizedAccessException)
         {

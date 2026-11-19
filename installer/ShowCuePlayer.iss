@@ -1,6 +1,6 @@
 #define MyAppName "7zyx Media"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.10"
 #endif
 #define MyAppPublisher "7zyx Media"
 #define MyAppExeName "ShowCuePlayer.exe"
@@ -54,12 +54,15 @@ var
   Version: String;
 begin
   Result :=
-    RegQueryStringValue(HKLM64,
-      'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1E7E1B7-75D0-4CBF-BF25-86D815E0C39B}',
-      'pv', Version) or
-    RegQueryStringValue(HKCU,
-      'Software\Microsoft\EdgeUpdate\Clients\{F1E7E1B7-75D0-4CBF-BF25-86D815E0C39B}',
-      'pv', Version);
+    (RegQueryStringValue(HKLM32,
+      'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+      'pv', Version) and (Version <> '')) or
+    (RegQueryStringValue(HKLM64,
+      'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+      'pv', Version) and (Version <> '')) or
+    (RegQueryStringValue(HKCU,
+      'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+      'pv', Version) and (Version <> ''));
 end;
 
 function InitializeSetup: Boolean;
